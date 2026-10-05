@@ -1,12 +1,11 @@
-"""Registro de agentes: cadastro, versões, propostas, autonomia e chaves — tudo operável pelo MCP."""
+"""Registro de agentes: cadastro, versões, propostas e autonomia — tudo operável pelo MCP."""
 
 from typing import Any
 
 import asyncpg
 
-from ..config import get_settings
 from ..db import audit, pool, record, records
-from ..security import KBError, NotFound, PermissionDenied, Principal, create_api_key, validate_scopes
+from ..security import KBError, NotFound, PermissionDenied, Principal, validate_scopes
 
 # Campos que só mudam por ação de quem tem agents:manage — nunca por proposta do próprio agente.
 PROTECTED_CONFIG_KEYS = {"auto_apply_updates"}
@@ -18,7 +17,7 @@ async def resolve_agent(conn: asyncpg.Connection, p: Principal, slug: str | None
     """Agente alvo da operação. Um agente só acessa a si mesmo; agents:manage acessa qualquer um."""
     if not slug:
         if p.agent_slug is None:
-            raise KBError("Informe agent_slug: esta chave não pertence a um agente.")
+            raise KBError("Informe agent_slug: esta conexão não pertence a um agente.")
         slug = p.agent_slug
     if slug != p.agent_slug and not p.is_manager:
         raise PermissionDenied("Um agente só acessa o próprio perfil.")
@@ -31,11 +30,6 @@ async def resolve_agent(conn: asyncpg.Connection, p: Principal, slug: str | None
 def _check_grant(p: Principal, scopes: list[str]) -> None:
     if _ELEVATED_SCOPES & set(scopes) and not p.has("admin"):
         raise PermissionDenied("Só uma chave admin pode dar os escopos 'admin' ou 'agents:manage' a um agente.")
-
-
-def connect_command(slug: str, api_key: str) -> str:
-    url = get_settings().public_url.rstrip("/")
-    return f'claude mcp add --transport http kb-{slug} {url}/mcp --header "Authorization: Bearer {api_key}"'
 
 
 def _profile(row: asyncpg.Record | dict) -> dict:
@@ -186,14 +180,8 @@ async def create_agent(
             row["scopes"],
             p.actor,
         )
-        key = await create_api_key(conn, label=f"agent:{row['slug']}", scopes=[], agent_id=row["id"])
         await audit(conn, p.actor, "agent.create", row["slug"])
-    return {
-        "agent": _profile(row),
-        "api_key": key["api_key"],
-        "api_key_notice": "Guarde a chave agora: ela não será exibida novamente.",
-        "connect_command": connect_command(row["slug"], key["api_key"]),
-    }
+    return _profile(row)
 
 
 async def update_agent(
@@ -252,15 +240,7 @@ async def get_agent(p: Principal, slug: str | None = None) -> dict:
             "FROM agent_versions WHERE agent_id = $1 ORDER BY created_at DESC LIMIT 20",
             agent["id"],
         )
-        out = {"agent": _profile(agent), "history": records(versions)}
-        if p.is_manager:
-            keys = await conn.fetch(
-                "SELECT id, prefix, label, created_at, last_used_at, revoked_at FROM api_keys "
-                "WHERE agent_id = $1 ORDER BY created_at DESC",
-                agent["id"],
-            )
-            out["api_keys"] = records(keys)
-    return out
+        return {"agent": _profile(agent), "history": records(versions)}
 
 
 async def list_agents(p: Principal, include_archived: bool = False) -> list[dict]:
@@ -303,13 +283,8 @@ async def archive_agent(p: Principal, slug: str, reason: str) -> dict:
     async with pool().acquire() as conn, conn.transaction():
         agent = await resolve_agent(conn, p, slug)
         await conn.execute("UPDATE agents SET status = 'archived', updated_at = now() WHERE id = $1", agent["id"])
-        revoked = await conn.fetchval(
-            "WITH r AS (UPDATE api_keys SET revoked_at = now() WHERE agent_id = $1 AND revoked_at IS NULL "
-            "RETURNING 1) SELECT count(*) FROM r",
-            agent["id"],
-        )
         await audit(conn, p.actor, "agent.archive", slug, reason=reason)
-    return {"archived": True, "slug": slug, "keys_revoked": revoked}
+    return {"archived": True, "slug": slug}
 
 
 async def restore_agent_version(p: Principal, slug: str, version: int, change_note: str | None = None) -> dict:
@@ -327,35 +302,6 @@ async def restore_agent_version(p: Principal, slug: str, version: int, change_no
         # config restaurada por inteiro (inclusive chaves removidas depois)
         changes["config"] = {**{k: None for k in agent["config"]}, **(old["config"] or {})}
         return await _apply(conn, agent, changes, p.actor, change_note or f"restaurado da versão {version}")
-
-
-# ---------------------------------------------------------------- chaves
-
-
-async def issue_agent_key(p: Principal, slug: str, label: str | None = None) -> dict:
-    p.require("agents:manage")
-    async with pool().acquire() as conn, conn.transaction():
-        agent = await resolve_agent(conn, p, slug)
-        key = await create_api_key(conn, label=label or f"agent:{slug}", scopes=[], agent_id=agent["id"])
-        await audit(conn, p.actor, "agent.key.issue", slug, prefix=key["prefix"])
-    return {
-        **key,
-        "api_key_notice": "Guarde a chave agora: ela não será exibida novamente.",
-        "connect_command": connect_command(slug, key["api_key"]),
-    }
-
-
-async def revoke_agent_key(p: Principal, key_prefix: str) -> dict:
-    p.require("agents:manage")
-    async with pool().acquire() as conn, conn.transaction():
-        rows = await conn.fetch(
-            "UPDATE api_keys SET revoked_at = now() WHERE prefix = $1 AND revoked_at IS NULL RETURNING id",
-            key_prefix,
-        )
-        if not rows:
-            raise NotFound(f"Nenhuma chave ativa com prefixo '{key_prefix}'.")
-        await audit(conn, p.actor, "key.revoke", key_prefix)
-    return {"revoked": len(rows), "prefix": key_prefix}
 
 
 # ---------------------------------------------------------------- propostas do próprio agente

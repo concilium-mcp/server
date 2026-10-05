@@ -1,4 +1,4 @@
--- Schema inicial: base de conhecimento + registro de agentes + chaves + auditoria
+-- Schema inicial: base de conhecimento + registro de agentes + auditoria
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
@@ -140,19 +140,7 @@ CREATE TABLE agent_tasks (
 );
 CREATE INDEX agent_tasks_agent_idx ON agent_tasks (agent_id, status);
 
--- ---------------------------------------------------------------- acesso e auditoria
-
-CREATE TABLE api_keys (
-  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  key_hash   TEXT UNIQUE NOT NULL,
-  prefix     TEXT NOT NULL,                   -- primeiros caracteres, para identificar a chave
-  label      TEXT,
-  agent_id   UUID REFERENCES agents(id) ON DELETE CASCADE,  -- NULL = chave humana/admin
-  scopes     TEXT[] NOT NULL DEFAULT '{read}', -- ignorado em chaves de agente (vale agents.scopes)
-  revoked_at TIMESTAMPTZ,
-  last_used_at TIMESTAMPTZ,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+-- ---------------------------------------------------------------- auditoria
 
 CREATE TABLE audit_log (
   id         BIGSERIAL PRIMARY KEY,

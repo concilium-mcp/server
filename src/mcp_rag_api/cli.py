@@ -1,22 +1,10 @@
-"""Linha de comando: servir (HTTP/stdio), migrar, criar chave admin, sincronizar agentes, limpeza."""
+"""Linha de comando: servir (HTTP/stdio), migrar, sincronizar agentes, limpeza."""
 
 import argparse
 import asyncio
 from pathlib import Path
 
 from . import db
-
-
-async def _create_key(label: str, scopes: list[str]) -> dict:
-    from .security import create_api_key
-
-    await db.run_migrations()
-    await db.init_pool()
-    try:
-        async with db.pool().acquire() as conn:
-            return await create_api_key(conn, label=label, scopes=scopes)
-    finally:
-        await db.close_pool()
 
 
 async def _sync_agents(out_dir: Path) -> list[Path]:
@@ -66,10 +54,6 @@ def main() -> None:
     sub.add_parser("stdio", help="MCP via stdio (usa KB_API_KEY)")
     sub.add_parser("migrate", help="Aplica migrações pendentes")
 
-    key = sub.add_parser("create-key", help="Cria uma chave humana (padrão: admin)")
-    key.add_argument("--label", default="admin")
-    key.add_argument("--scopes", nargs="+", default=["admin"])
-
     sync = sub.add_parser("sync-agents", help="Gera .claude/agents/<slug>.md a partir do banco")
     sync.add_argument("--out", type=Path, default=Path(".claude/agents"))
 
@@ -88,10 +72,6 @@ def main() -> None:
         case "migrate":
             applied = asyncio.run(db.run_migrations())
             print("Aplicadas:", ", ".join(applied) if applied else "nenhuma (já atualizado)")
-        case "create-key":
-            result = asyncio.run(_create_key(args.label, args.scopes))
-            print(f"Chave criada ({', '.join(args.scopes)}). Guarde agora, ela não será exibida de novo:\n")
-            print(result["api_key"])
         case "sync-agents":
             for path in asyncio.run(_sync_agents(args.out)):
                 print("escrito:", path)
