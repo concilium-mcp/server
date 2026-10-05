@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from . import db
 from .config import get_settings
 from .core import agents, documents, memory, search
-from .security import DEV_PRINCIPAL, PermissionDenied, Principal, bearer_token, resolve_key
+from .security import DEV_PRINCIPAL, PermissionDenied, Principal, bearer_token, resolve_env_key
 
 router = APIRouter()
 
@@ -17,8 +17,7 @@ router = APIRouter()
 async def principal(authorization: str | None = Header(default=None)) -> Principal:
     token = bearer_token(authorization)
     if token:
-        async with db.pool().acquire() as conn:
-            return await resolve_key(conn, token)
+        return resolve_env_key(token)
     if get_settings().kb_auth_disabled:
         return DEV_PRINCIPAL
     raise PermissionDenied("Autenticação necessária: Authorization: Bearer <chave>.")
@@ -235,11 +234,6 @@ async def set_autonomy(slug: str, body: AutonomyIn, p: Principal = Auth) -> dict
 @router.delete("/agents/{slug}")
 async def archive_agent(slug: str, reason: str = "arquivado via API", p: Principal = Auth) -> dict:
     return await agents.archive_agent(p, slug, reason)
-
-
-@router.post("/agents/{slug}/keys")
-async def issue_key(slug: str, label: str | None = None, p: Principal = Auth) -> dict:
-    return await agents.issue_agent_key(p, slug, label)
 
 
 @router.get("/agents/{slug}/context")

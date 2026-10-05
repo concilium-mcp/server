@@ -1,4 +1,4 @@
-"""Chaves de API, identidade (Principal) e escopos.
+"""Identidade (Principal), escopos e autenticação pela chave única do .env (KB_API_KEY).
 
 Escopos:
   read           consultar a base e o próprio agente
@@ -7,16 +7,14 @@ Escopos:
   admin          tudo
 """
 
-import hashlib
-import secrets
+import hmac
 from dataclasses import dataclass, field
 from uuid import UUID
 
-import asyncpg
+from .config import get_settings
 
 VALID_SCOPES = {"read", "write", "agents:manage", "admin"}
 _IMPLIES = {"write": {"read"}, "agents:manage": {"read"}}
-KEY_PREFIX = "kb_sk_"
 
 
 class KBError(Exception):
@@ -78,50 +76,12 @@ def validate_scopes(scopes: list[str]) -> list[str]:
     return sorted(set(scopes))
 
 
-def hash_key(raw: str) -> str:
-    return hashlib.sha256(raw.encode()).hexdigest()
-
-
-async def create_api_key(
-    conn: asyncpg.Connection, *, label: str, scopes: list[str], agent_id: UUID | None = None
-) -> dict:
-    raw = KEY_PREFIX + secrets.token_urlsafe(32)
-    row = await conn.fetchrow(
-        "INSERT INTO api_keys (key_hash, prefix, label, agent_id, scopes) VALUES ($1, $2, $3, $4, $5) "
-        "RETURNING id, prefix, created_at",
-        hash_key(raw),
-        raw[:12],
-        label,
-        agent_id,
-        validate_scopes(scopes),
-    )
-    return {"key_id": str(row["id"]), "prefix": row["prefix"], "api_key": raw}
-
-
-async def resolve_key(conn: asyncpg.Connection, raw: str) -> Principal:
-    row = await conn.fetchrow(
-        """
-        SELECT k.id, k.prefix, k.scopes AS key_scopes, k.agent_id,
-               a.slug, a.scopes AS agent_scopes, a.allowed_collections, a.status AS agent_status
-        FROM api_keys k LEFT JOIN agents a ON a.id = k.agent_id
-        WHERE k.key_hash = $1 AND k.revoked_at IS NULL
-        """,
-        hash_key(raw),
-    )
-    if row is None:
-        raise PermissionDenied("Chave de API inválida ou revogada.")
-    await conn.execute("UPDATE api_keys SET last_used_at = now() WHERE id = $1", row["id"])
-    if row["agent_id"] is None:
-        return Principal(actor=f"key:{row['prefix']}", scopes=frozenset(row["key_scopes"]))
-    if row["agent_status"] != "active":
-        raise PermissionDenied("O agente desta chave está arquivado.")
-    return Principal(
-        actor=f"agent:{row['slug']}",
-        scopes=frozenset(row["agent_scopes"]),
-        agent_id=row["agent_id"],
-        agent_slug=row["slug"],
-        allowed_collections=tuple(row["allowed_collections"]),
-    )
+def resolve_env_key(token: str) -> Principal:
+    """Valida o Bearer token contra KB_API_KEY (comparação em tempo constante, sem query no banco)."""
+    expected = get_settings().kb_api_key
+    if not expected or not hmac.compare_digest(token.encode(), expected.encode()):
+        raise PermissionDenied("Chave de API inválida.")
+    return Principal(actor="env:kb_api_key", scopes=frozenset({"admin"}))
 
 
 def bearer_token(authorization: str | None) -> str | None:

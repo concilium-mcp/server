@@ -1,9 +1,8 @@
 import pytest
 
-from mcp_rag_api import db
 from mcp_rag_api.core import agents, documents, memory, search
 from mcp_rag_api.security import DEV_PRINCIPAL as ADMIN
-from mcp_rag_api.security import KBError, PermissionDenied, resolve_key
+from mcp_rag_api.security import KBError, PermissionDenied, Principal
 
 MANUAL = (
     "Política de reembolso: o cliente pode pedir reembolso em até 7 dias após a compra. "
@@ -11,9 +10,9 @@ MANUAL = (
 )
 
 
-async def principal_for(api_key: str):
-    async with db.pool().acquire() as conn:
-        return await resolve_key(conn, api_key)
+def agent_principal(slug: str, scopes: set[str], collections: tuple[str, ...] = ()) -> Principal:
+    """Principal como se a requisição viesse de um agente (a chave única do servidor é admin)."""
+    return Principal(actor=f"agent:{slug}", scopes=frozenset(scopes), agent_slug=slug, allowed_collections=collections)
 
 
 async def test_documents_search_duplicates_and_versions():
@@ -55,10 +54,11 @@ async def test_agent_lifecycle_via_services():
         allowed_collections=["manuais"],
         scopes=["read"],
     )
-    assert created["agent"]["version"] == 1
-    assert created["agent"]["config"]["auto_apply_updates"] is False
-    assert "claude mcp add" in created["connect_command"]
-    agent = await principal_for(created["api_key"])
+    assert created["version"] == 1
+    assert created["config"]["auto_apply_updates"] is False
+
+    # isolamento: escopos e coleções do perfil são respeitados quando o acesso é como o agente
+    agent = agent_principal("suporte", {"read"}, ("manuais",))
     assert agent.agent_slug == "suporte" and not agent.has("write")
 
     # isolamento: coleção não permitida e escrita sem escopo
@@ -93,8 +93,8 @@ async def test_agent_lifecycle_via_services():
 
 
 async def test_proposals_autonomy_and_protected_fields():
-    created = await agents.create_agent(ADMIN, slug="financeiro", name="Fin", system_prompt="v1")
-    agent = await principal_for(created["api_key"])
+    await agents.create_agent(ADMIN, slug="financeiro", name="Fin", system_prompt="v1")
+    agent = agent_principal("financeiro", {"read", "write"})
 
     # autonomia desligada: proposta fica pendente; campo protegido é ignorado
     prop = await agents.propose_agent_update(
@@ -127,7 +127,7 @@ async def test_proposals_autonomy_and_protected_fields():
     assert restored["system_prompt"] == "v2"
     assert restored["config"]["auto_apply_updates"] is False
 
-    # arquivar revoga chaves
+    # arquivar impede o load_agent
     await agents.archive_agent(ADMIN, "financeiro", "teste")
-    with pytest.raises(PermissionDenied):
-        await principal_for(created["api_key"])
+    with pytest.raises(KBError):
+        await memory.load_agent(agent, "financeiro")

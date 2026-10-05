@@ -11,7 +11,7 @@ from . import db
 from .api import router
 from .config import get_settings
 from .mcp_server import mcp
-from .security import KBError, NotFound, PermissionDenied, bearer_token, resolve_key
+from .security import KBError, NotFound, PermissionDenied, bearer_token, resolve_env_key
 
 # Precisa ser criado antes do lifespan: é aqui que o MCPServer instancia o session manager.
 # host="0.0.0.0" evita a proteção automática que só aceita Host localhost (atrás de proxy/domínio).
@@ -35,9 +35,9 @@ async def kb_error_handler(_request: Request, exc: KBError) -> JSONResponse:
 
 
 class RequireApiKey:
-    """Barra o /mcp inteiro (inclusive initialize e list_tools) sem uma chave válida.
+    """Barra o /mcp inteiro (inclusive initialize e list_tools) sem a chave do .env.
 
-    Cada tool ainda resolve a chave e confere escopos; isto é só o portão, para que um servidor
+    Cada tool ainda confere escopos no Principal; isto é só o portão, para que um servidor
     exposto na internet não revele nem a lista de tools a quem não tem chave.
     """
 
@@ -51,14 +51,13 @@ class RequireApiKey:
             valid = False
             if token:
                 try:
-                    async with db.pool().acquire() as conn:
-                        await resolve_key(conn, token)
+                    resolve_env_key(token)
                     valid = True
                 except PermissionDenied:
                     pass
             if not valid:
                 response = JSONResponse(
-                    {"detail": "Chave de API ausente, inválida ou revogada."},
+                    {"detail": "Chave de API ausente ou inválida."},
                     status_code=401,
                     headers={"WWW-Authenticate": "Bearer"},
                 )

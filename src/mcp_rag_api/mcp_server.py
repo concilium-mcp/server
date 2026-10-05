@@ -13,7 +13,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from . import db
 from .config import get_settings
 from .core import agents, documents, memory, search
-from .security import DEV_PRINCIPAL, KBError, PermissionDenied, Principal, bearer_token, resolve_key
+from .security import DEV_PRINCIPAL, KBError, PermissionDenied, Principal, bearer_token, resolve_env_key
 
 INSTRUCTIONS = """\
 Base de conhecimento compartilhada + registro de agentes.
@@ -53,8 +53,7 @@ async def current_principal(ctx: Context) -> Principal:
     else:  # stdio
         token = settings.kb_api_key or None
     if token:
-        async with db.pool().acquire() as conn:
-            return await resolve_key(conn, token)
+        return resolve_env_key(token)
     if settings.kb_auth_disabled:
         return DEV_PRINCIPAL
     raise PermissionDenied("Autenticação necessária: envie 'Authorization: Bearer <chave>' (ou KB_API_KEY no stdio).")
@@ -201,8 +200,8 @@ async def document_history(ctx: Context, document_id: str) -> list[dict]:
 
 @tool
 async def load_agent(ctx: Context, agent_slug: str | None = None) -> dict:
-    """CHAME NO INÍCIO DE TODA CONVERSA. Carrega seu perfil (instruções), memórias mais importantes,
-    resumo da última sessão e tarefas abertas. Sem agent_slug usa o agente dono da chave."""
+    """CHAME NO INÍCIO DE TODA CONVERSA, com o seu agent_slug. Carrega seu perfil (instruções),
+    memórias mais importantes, resumo da última sessão e tarefas abertas."""
     return await memory.load_agent(await current_principal(ctx), agent_slug)
 
 
@@ -312,7 +311,8 @@ async def create_agent(
 ) -> dict:
     """Cadastra um agente novo. Só chame depois que o usuário confirmar o perfil (veja o prompt
     design_agent). slug: minúsculas/números/hífen. scopes padrão: read, write. allowed_collections vazio
-    = todas. Retorna a API key do agente (exibida uma única vez) e o comando para conectá-lo."""
+    = todas. O acesso é pela chave única do servidor (KB_API_KEY); para operar como o agente, use
+    load_agent com o slug dele."""
     return await agents.create_agent(
         await current_principal(ctx), slug, name, system_prompt, description, config, allowed_collections, scopes
     )
@@ -354,7 +354,7 @@ async def set_agent_autonomy(ctx: Context, slug: str, auto_apply_updates: bool, 
 
 @tool
 async def get_agent(ctx: Context, slug: str | None = None) -> dict:
-    """Perfil completo de um agente + histórico de versões/propostas (+ chaves, para agents:manage)."""
+    """Perfil completo de um agente + histórico de versões/propostas."""
     return await agents.get_agent(await current_principal(ctx), slug)
 
 
@@ -375,7 +375,7 @@ async def clone_agent(
 
 @tool
 async def archive_agent(ctx: Context, slug: str, reason: str) -> dict:
-    """Desativa um agente e revoga todas as chaves dele."""
+    """Desativa um agente: ele some das listagens e não carrega mais via load_agent."""
     return await agents.archive_agent(await current_principal(ctx), slug, reason)
 
 
@@ -383,18 +383,6 @@ async def archive_agent(ctx: Context, slug: str, reason: str) -> dict:
 async def restore_agent_version(ctx: Context, slug: str, version: int, change_note: str | None = None) -> dict:
     """Volta o perfil do agente para uma versão anterior (gera uma nova versão com aquele conteúdo)."""
     return await agents.restore_agent_version(await current_principal(ctx), slug, version, change_note)
-
-
-@tool
-async def issue_agent_key(ctx: Context, slug: str, label: str | None = None) -> dict:
-    """Gera uma nova API key para o agente (rotação). A chave é exibida uma única vez."""
-    return await agents.issue_agent_key(await current_principal(ctx), slug, label)
-
-
-@tool
-async def revoke_agent_key(ctx: Context, key_prefix: str) -> dict:
-    """Revoga uma chave pelo prefixo (ex.: 'kb_sk_AbCdE'), visto em get_agent."""
-    return await agents.revoke_agent_key(await current_principal(ctx), key_prefix)
 
 
 @tool
@@ -460,7 +448,8 @@ def design_agent(pedido: str = "") -> str:
    PEÇA CONFIRMAÇÃO. Ajuste até o usuário aprovar.
 4. Só então chame create_agent. Se a autonomia foi liberada, chame set_agent_autonomy. Semeie memórias
    e tarefas com add_agent_memory / add_agent_task.
-5. Entregue a API key e o connect_command e avise que a chave não será exibida de novo."""
+5. Entregue o slug do agente e lembre que o acesso é pela chave única do servidor (KB_API_KEY): para
+   operar como ele, conecte com essa chave e use o prompt start_as_agent <slug>."""
 
 
 @mcp.prompt()

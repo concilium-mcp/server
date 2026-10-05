@@ -1,6 +1,38 @@
 import pytest
 
-from mcp_rag_api.security import KBError, PermissionDenied, Principal, bearer_token, validate_scopes
+from mcp_rag_api.config import Settings
+from mcp_rag_api.security import (
+    KBError,
+    PermissionDenied,
+    Principal,
+    bearer_token,
+    resolve_env_key,
+    validate_scopes,
+)
+
+
+@pytest.fixture
+def env_key(monkeypatch):
+    monkeypatch.setattr(
+        "mcp_rag_api.security.get_settings", lambda: Settings(kb_api_key="segredo-de-teste")
+    )
+
+
+def test_resolve_env_key_ok(env_key):
+    p = resolve_env_key("segredo-de-teste")
+    assert p.actor == "env:kb_api_key"
+    assert p.has("admin") and p.is_manager
+
+
+def test_resolve_env_key_rejeita_token_errado(env_key):
+    with pytest.raises(PermissionDenied):
+        resolve_env_key("outra-chave")
+
+
+def test_resolve_env_key_sem_chave_configurada(monkeypatch):
+    monkeypatch.setattr("mcp_rag_api.security.get_settings", lambda: Settings(kb_api_key=""))
+    with pytest.raises(PermissionDenied):
+        resolve_env_key("qualquer-uma")
 
 
 def test_scope_implications():

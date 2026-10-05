@@ -14,7 +14,6 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     database_url: str = "postgresql://user:password@localhost:5432/kb"
-    public_url: str = "http://localhost:8000"
     migrations_dir: Path = PROJECT_ROOT / "migrations"
 
     embedding_provider: Literal["voyage", "openai", "local", "fake"] = "voyage"
