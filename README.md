@@ -1,4 +1,8 @@
-# MCP RAG API
+<p align="center">
+  <img src="docs/assets/hero.png" alt="MCP RAG API" width="280" />
+</p>
+
+<h1 align="center">MCP RAG API</h1>
 
 Servidor **MCP** e **API REST** em Python, com **PostgreSQL + pgvector**. Ele oferece duas coisas aos seus agentes de IA:
 
