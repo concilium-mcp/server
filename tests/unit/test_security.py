@@ -24,12 +24,12 @@ def test_resolve_env_key_ok(env_key):
     assert p.has("admin") and p.is_manager
 
 
-def test_resolve_env_key_rejeita_token_errado(env_key):
+def test_resolve_env_key_rejects_wrong_token(env_key):
     with pytest.raises(PermissionDenied):
         resolve_env_key("outra-chave")
 
 
-def test_resolve_env_key_sem_chave_configurada(monkeypatch):
+def test_resolve_env_key_without_configured_key(monkeypatch):
     monkeypatch.setattr("mcp_rag_api.security.get_settings", lambda: Settings(kb_api_key=""))
     with pytest.raises(PermissionDenied):
         resolve_env_key("qualquer-uma")
