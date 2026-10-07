@@ -38,27 +38,28 @@ async def run_migrations(database_url: str | None = None) -> list[str]:
     settings = get_settings()
     conn = await asyncpg.connect(database_url or settings.database_url)
     applied: list[str] = []
+    # Sem este lock, dois processos subindo juntos em banco fresco (ex.: --workers >1
+    # ou rolling deploy) correm as migrações em paralelo. O CREATE TABLE IF NOT EXISTS
+    # da tabela de controle também fica sob o lock: IF NOT EXISTS não é atômico contra
+    # DDL concorrente (o Postgres falha com UniqueViolation no tipo composto da tabela).
+    # A leitura de schema_migrations precisa ser DEPOIS do lock, senão o segundo
+    # processo tenta reaplicar migrações que o primeiro acabou de aplicar.
+    await conn.fetchval("SELECT pg_advisory_lock($1)", _MIGRATION_LOCK_KEY)
     try:
         await conn.execute(
             "CREATE TABLE IF NOT EXISTS schema_migrations "
             "(name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())"
         )
-        # Sem este lock, dois processos subindo juntos em banco fresco correm as
-        # migrações em paralelo (ex.: --workers >1 ou rolling deploy). A leitura
-        # de schema_migrations tem que acontecer DEPOIS de adquirir o lock.
-        await conn.fetchval("SELECT pg_advisory_lock($1)", _MIGRATION_LOCK_KEY)
-        try:
-            done = {r["name"] for r in await conn.fetch("SELECT name FROM schema_migrations")}
-            for path in sorted(_migrations_dir().glob("*.sql")):
-                if path.name in done:
-                    continue
-                async with conn.transaction():
-                    await conn.execute(path.read_text(encoding="utf-8"))
-                    await conn.execute("INSERT INTO schema_migrations (name) VALUES ($1)", path.name)
-                applied.append(path.name)
-        finally:
-            await conn.fetchval("SELECT pg_advisory_unlock($1)", _MIGRATION_LOCK_KEY)
+        done = {r["name"] for r in await conn.fetch("SELECT name FROM schema_migrations")}
+        for path in sorted(_migrations_dir().glob("*.sql")):
+            if path.name in done:
+                continue
+            async with conn.transaction():
+                await conn.execute(path.read_text(encoding="utf-8"))
+                await conn.execute("INSERT INTO schema_migrations (name) VALUES ($1)", path.name)
+            applied.append(path.name)
     finally:
+        await conn.fetchval("SELECT pg_advisory_unlock($1)", _MIGRATION_LOCK_KEY)
         await conn.close()
     return applied
 
