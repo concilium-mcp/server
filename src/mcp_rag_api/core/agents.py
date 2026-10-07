@@ -33,7 +33,9 @@ def _check_grant(p: Principal, scopes: list[str]) -> None:
 
 
 def _profile(row: asyncpg.Record | dict) -> dict:
-    r = record(row) if not isinstance(row, dict) else row
+    r = row if isinstance(row, dict) else record(row)
+    if r is None:
+        raise KBError("Registro de agente inválido.")
     keys = (
         "slug",
         "name",
