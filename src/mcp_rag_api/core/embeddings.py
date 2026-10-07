@@ -49,9 +49,7 @@ async def _post_with_retry(
         await asyncio.sleep(delay)
         delay *= 2
     # Só provider + status: nunca conteúdo dos textos nem chaves.
-    get_logger().warning(
-        "embedding: provider=%s falhou (status=%s) após %d tentativa(s)", provider, status, attempt
-    )
+    get_logger().warning("embedding: provider=%s falhou (status=%s) após %d tentativa(s)", provider, status, attempt)
     raise EmbeddingProviderError(f"Provedor de embeddings '{provider}' falhou (status {status})")
 
 

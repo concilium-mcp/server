@@ -29,6 +29,7 @@ def test_500_devolve_json_generico_e_loga(monkeypatch, caplog):
     raise_server_exceptions=False porque o middleware re-lança a exceção após responder
     (comportamento normal em produção, onde o servidor registra o traceback no log).
     """
+
     def _boom():
         raise RuntimeError("falha inesperada")
 
