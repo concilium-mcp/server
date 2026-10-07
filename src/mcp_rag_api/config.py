@@ -6,7 +6,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-# Dimensão fixa do vetor no schema (migrations/001_init.sql). Todos os provedores são configurados para ela.
+# Dimensão fixa do vetor no schema (src/mcp_rag_api/migrations/001_init.sql).
+# Todos os provedores são configurados para ela.
 EMBEDDING_DIM = 1024
 
 
@@ -14,7 +15,9 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     database_url: str = "postgresql://user:password@localhost:5432/kb"
-    migrations_dir: Path = PROJECT_ROOT / "migrations"
+    # None = usa as migrações empacotadas no wheel (importlib.resources);
+    # MIGRATIONS_DIR no env continua podendo apontar para outro diretório.
+    migrations_dir: Path | None = None
 
     embedding_provider: Literal["voyage", "openai", "local", "fake"] = "voyage"
     embedding_model: str = ""

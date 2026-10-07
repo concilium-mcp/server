@@ -4,6 +4,8 @@ import json
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from importlib import resources
+from pathlib import Path
 from typing import Any
 
 import asyncpg
@@ -24,6 +26,14 @@ async def _init_connection(conn: asyncpg.Connection) -> None:
     await conn.set_type_codec("jsonb", encoder=json.dumps, decoder=json.loads, schema="pg_catalog")
 
 
+def _migrations_dir() -> Path:
+    """Diretório das migrações: MIGRATIONS_DIR (env) se definido, senão as do wheel."""
+    override = get_settings().migrations_dir
+    if override is not None:
+        return override
+    return Path(str(resources.files("mcp_rag_api"))) / "migrations"
+
+
 async def run_migrations(database_url: str | None = None) -> list[str]:
     settings = get_settings()
     conn = await asyncpg.connect(database_url or settings.database_url)
@@ -39,7 +49,7 @@ async def run_migrations(database_url: str | None = None) -> list[str]:
         await conn.fetchval("SELECT pg_advisory_lock($1)", _MIGRATION_LOCK_KEY)
         try:
             done = {r["name"] for r in await conn.fetch("SELECT name FROM schema_migrations")}
-            for path in sorted(settings.migrations_dir.glob("*.sql")):
+            for path in sorted(_migrations_dir().glob("*.sql")):
                 if path.name in done:
                     continue
                 async with conn.transaction():
