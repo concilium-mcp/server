@@ -13,6 +13,11 @@ from .config import get_settings
 
 _pool: asyncpg.Pool | None = None
 
+# Lock de sessão que serializa o runner de migrações entre processos
+# (rolling deploy ou --workers >1 subindo junto no mesmo banco). É um advisory
+# lock de sessão: se a conexão cair, o Postgres libera o lock sozinho.
+_MIGRATION_LOCK_KEY = 0x4B424D49  # "KBMI"
+
 
 async def _init_connection(conn: asyncpg.Connection) -> None:
     await register_vector(conn)
@@ -28,14 +33,21 @@ async def run_migrations(database_url: str | None = None) -> list[str]:
             "CREATE TABLE IF NOT EXISTS schema_migrations "
             "(name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())"
         )
-        done = {r["name"] for r in await conn.fetch("SELECT name FROM schema_migrations")}
-        for path in sorted(settings.migrations_dir.glob("*.sql")):
-            if path.name in done:
-                continue
-            async with conn.transaction():
-                await conn.execute(path.read_text(encoding="utf-8"))
-                await conn.execute("INSERT INTO schema_migrations (name) VALUES ($1)", path.name)
-            applied.append(path.name)
+        # Sem este lock, dois processos subindo juntos em banco fresco correm as
+        # migrações em paralelo (ex.: --workers >1 ou rolling deploy). A leitura
+        # de schema_migrations tem que acontecer DEPOIS de adquirir o lock.
+        await conn.fetchval("SELECT pg_advisory_lock($1)", _MIGRATION_LOCK_KEY)
+        try:
+            done = {r["name"] for r in await conn.fetch("SELECT name FROM schema_migrations")}
+            for path in sorted(settings.migrations_dir.glob("*.sql")):
+                if path.name in done:
+                    continue
+                async with conn.transaction():
+                    await conn.execute(path.read_text(encoding="utf-8"))
+                    await conn.execute("INSERT INTO schema_migrations (name) VALUES ($1)", path.name)
+                applied.append(path.name)
+        finally:
+            await conn.fetchval("SELECT pg_advisory_unlock($1)", _MIGRATION_LOCK_KEY)
     finally:
         await conn.close()
     return applied
