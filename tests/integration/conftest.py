@@ -1,15 +1,27 @@
 """Testes de integração contra Postgres + pgvector reais.
 
-Rode com: TEST_DATABASE_URL=postgresql://user:password@localhost:5432/kb_test pytest tests/integration
+Rode com: TEST_DATABASE_URL=postgresql://user:password@localhost:5432/kb_test_s02 pytest tests/integration
 O banco indicado é APAGADO (schema public recriado) a cada execução.
+Por segurança, o nome do banco deve conter "test" — a execução aborta caso contrário.
 """
 
 import os
+from urllib.parse import urlparse
 
 import asyncpg
 import pytest
 
 TEST_DB = os.environ.get("TEST_DATABASE_URL")
+
+
+def _check_test_database_url(url: str) -> None:
+    """Trava de segurança: só permite bancos com "test" no nome (ex.: kb_test_s02)."""
+    db_name = urlparse(url).path.lstrip("/")
+    if "test" not in db_name.lower():
+        raise RuntimeError(
+            f"TEST_DATABASE_URL aponta para '{db_name}', que não parece um banco de testes "
+            '(o nome deve conter "test"). Recusando destruir o schema public desse banco.'
+        )
 
 
 def pytest_collection_modifyitems(config, items):
@@ -26,6 +38,7 @@ async def database():
     if not TEST_DB:
         yield
         return
+    _check_test_database_url(TEST_DB)
     os.environ["DATABASE_URL"] = TEST_DB
     os.environ["EMBEDDING_PROVIDER"] = "fake"
     os.environ["KB_AUTH_DISABLED"] = "false"

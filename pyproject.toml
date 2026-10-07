@@ -3,7 +3,7 @@ name = "mcp-rag-api"
 version = "0.1.0"
 description = "Servidor MCP + API REST com RAG (PostgreSQL + pgvector) e registro de agentes"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "mcp[cli]>=2.2,<3",
     "fastapi>=0.115",
@@ -44,8 +44,20 @@ pythonpath = ["src"]
 
 [tool.ruff]
 line-length = 120
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "ASYNC"]
-ignore = ["B008", "ASYNC240"]  # Query()/Depends() em defaults é o idioma do FastAPI
+ignore = ["B008", "ASYNC240", "UP047"]  # Query()/Depends() em defaults é o idioma do FastAPI; UP047: mypy não suporta ParamSpec via PEP 695 em closures
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = ["asyncpg", "sentence_transformers"]
+ignore_missing_imports = true

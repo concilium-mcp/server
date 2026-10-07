@@ -1,7 +1,7 @@
 """Coleções e documentos: CRUD, versionamento, indexação em chunks e detecção de duplicatas."""
 
 import uuid
-from typing import Any
+from typing import Any, cast
 
 import asyncpg
 import numpy as np
@@ -55,7 +55,7 @@ async def _collection_id(conn: asyncpg.Connection, name: str) -> uuid.UUID:
     cid = await conn.fetchval("SELECT id FROM collections WHERE name = $1", name)
     if cid is None:
         raise NotFound(f"Coleção '{name}' não existe. Crie com create_collection.")
-    return cid
+    return cast(uuid.UUID, cid)  # fetchval vem de asyncpg (sem stubs) e é Any
 
 
 # ---------------------------------------------------------------- indexação
