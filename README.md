@@ -307,6 +307,42 @@ Pedidos no chat, com o `KB_API_KEY`:
 
 Todas as rotas exigem `Authorization: Bearer <KB_API_KEY>` (ou `Bearer <KB_READ_ONLY_KEY>` para consultas). A lista completa, com formulário de teste, está em http://localhost:8000/docs — disponível só quando `KB_DOCS_ENABLED=true`.
 
+A REST espelha as tools MCP — mesmas funções de `core/`, mesma autenticação e escopos:
+
+| Método | Rota | Espelha a tool | O que faz |
+|---|---|---|---|
+| `GET` | `/health` | — | status do servidor (público) |
+| `GET` | `/collections` | `list_collections` | lista as coleções acessíveis |
+| `POST` | `/collections` | `create_collection` | cria/atualiza descrição de coleção |
+| `POST` | `/search` | `search_knowledge` | busca híbrida na base |
+| `GET` | `/documents` | `list_documents` | lista documentos (filtros por coleção/tags/status) |
+| `POST` | `/documents` | `add_document` | insere documento novo (avisa duplicata) |
+| `PUT` | `/documents/upsert` | `upsert_document` | cria ou atualiza por `external_id` (sincronização) |
+| `GET` | `/documents/{id}` | `get_document` | documento completo |
+| `PATCH` | `/documents/{id}` | `update_document` | atualiza e gera nova versão |
+| `DELETE` | `/documents/{id}` | `archive_document` | arquiva o documento |
+| `GET` | `/documents/{id}/versions` | `document_history` | histórico de versões |
+| `GET` | `/agents` | `list_agents` | lista os agentes |
+| `POST` | `/agents` | `create_agent` | cadastra agente |
+| `GET` | `/agents/proposals` | `list_agent_proposals` | propostas pendentes |
+| `POST` | `/agents/proposals/{id}/review` | `review_agent_update` | aprova/rejeita proposta |
+| `GET` | `/agents/{slug}` | `get_agent` | perfil + histórico de versões |
+| `PATCH` | `/agents/{slug}` | `update_agent` | altera o perfil (nova versão) |
+| `PUT` | `/agents/{slug}/autonomy` | `set_agent_autonomy` | liga/desliga autoatualização |
+| `DELETE` | `/agents/{slug}` | `archive_agent` | desativa o agente |
+| `POST` | `/agents/{slug}/clone` | `clone_agent` | cria agente novo a partir de outro |
+| `POST` | `/agents/{slug}/versions/{version}/restore` | `restore_agent_version` | restaura uma versão anterior |
+| `GET` | `/agents/{slug}/context` | `load_agent` | pacote de contexto do agente |
+| `GET` | `/agents/{slug}/memories` | `recall` | busca semântica nas memórias (`include_shared=true` por padrão) |
+| `POST` | `/agents/{slug}/memories` | `remember` / `add_agent_memory` | salva (ou semeia) uma memória |
+| `POST` | `/agents/{slug}/memories:forget` | `forget` | apaga ou corrige uma memória |
+| `GET` | `/agents/{slug}/sessions` | `list_sessions` | resumos de sessão |
+| `POST` | `/agents/{slug}/sessions` | `save_session` | grava resumo de sessão |
+| `GET` | `/agents/{slug}/tasks` | `list_tasks` | tarefas do agente |
+| `POST` | `/agents/{slug}/tasks` | `upsert_task` / `add_agent_task` | cria ou atualiza tarefa |
+
+Exemplos:
+
 ```bash
 KEY=$KB_API_KEY
 API=http://localhost:8000
@@ -329,6 +365,19 @@ curl -s $API/agents/suporte/context -H "Authorization: Bearer $KEY"
 # ligar a autonomia
 curl -s -X PUT $API/agents/suporte/autonomy -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
   -d '{"auto_apply_updates": true}'
+
+# apagar (ou corrigir, com "replacement") uma memória errada
+curl -s -X POST $API/agents/suporte/memories:forget -H "Authorization: Bearer $KEY" \
+  -H "Content-Type: application/json" -d '{"memory_id": 12}'
+
+# clonar um agente (tom mais formal, mesmas coleções)
+curl -s -X POST $API/agents/suporte/clone -H "Authorization: Bearer $KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"new_slug": "suporte-vip", "name": "Suporte VIP", "overrides": {"description": "Variação com tom formal."}}'
+
+# restaurar a versão 2 do perfil
+curl -s -X POST $API/agents/suporte/versions/2/restore -H "Authorization: Bearer $KEY" \
+  -H "Content-Type: application/json" -d '{"change_note": "revertendo ajuste de tom"}'
 ```
 
 ## 11. Referência

@@ -98,6 +98,21 @@ class AutonomyIn(BaseModel):
     note: str | None = None
 
 
+class ForgetIn(BaseModel):
+    memory_id: int
+    replacement: str | None = None
+
+
+class CloneIn(BaseModel):
+    new_slug: str
+    name: str
+    overrides: dict[str, Any] | None = None
+
+
+class RestoreIn(BaseModel):
+    change_note: str | None = None
+
+
 class ReviewIn(BaseModel):
     approve: bool
     note: str | None = None
@@ -242,13 +257,30 @@ async def agent_context(slug: str, p: Principal = Auth) -> dict:
 
 
 @router.get("/agents/{slug}/memories")
-async def recall(slug: str, query: str, limit: int = 8, p: Principal = Auth) -> list[dict]:
-    return await memory.recall(p, query, slug, limit=limit)
+async def recall(
+    slug: str, query: str, include_shared: bool = True, limit: int = 8, p: Principal = Auth
+) -> list[dict]:
+    return await memory.recall(p, query, slug, include_shared, limit)
 
 
 @router.post("/agents/{slug}/memories")
 async def remember(slug: str, body: MemoryIn, p: Principal = Auth) -> dict:
     return await memory.remember(p, agent_slug=slug, **body.model_dump())
+
+
+@router.post("/agents/{slug}/memories:forget")
+async def forget_memory(slug: str, body: ForgetIn, p: Principal = Auth) -> dict:
+    return await memory.forget(p, body.memory_id, body.replacement, agent_slug=slug)
+
+
+@router.post("/agents/{slug}/clone")
+async def clone_agent(slug: str, body: CloneIn, p: Principal = Auth) -> dict:
+    return await agents.clone_agent(p, slug, body.new_slug, body.name, body.overrides)
+
+
+@router.post("/agents/{slug}/versions/{version}/restore")
+async def restore_agent_version(slug: str, version: int, body: RestoreIn, p: Principal = Auth) -> dict:
+    return await agents.restore_agent_version(p, slug, version, body.change_note)
 
 
 @router.get("/agents/{slug}/sessions")
