@@ -13,9 +13,7 @@ from mcp_rag_api.security import (
 
 @pytest.fixture
 def env_key(monkeypatch):
-    monkeypatch.setattr(
-        "mcp_rag_api.security.get_settings", lambda: Settings(kb_api_key="segredo-de-teste")
-    )
+    monkeypatch.setattr("mcp_rag_api.security.get_settings", lambda: Settings(kb_api_key="segredo-de-teste"))
 
 
 def test_resolve_env_key_ok(env_key):
