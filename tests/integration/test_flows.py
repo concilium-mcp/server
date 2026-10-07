@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from mcp_rag_api.core import agents, documents, memory, search
@@ -52,20 +54,29 @@ async def test_agent_lifecycle_via_services():
         name="Suporte pós-venda",
         system_prompt="Você é o suporte. Tom cordial. Nunca prometa reembolso.",
         allowed_collections=["manuais"],
-        scopes=["read"],
+        scopes=["read", "write"],
     )
     assert created["version"] == 1
     assert created["config"]["auto_apply_updates"] is False
 
     # isolamento: escopos e coleções do perfil são respeitados quando o acesso é como o agente
-    agent = agent_principal("suporte", {"read"}, ("manuais",))
-    assert agent.agent_slug == "suporte" and not agent.has("write")
+    agent = agent_principal("suporte", {"read", "write"}, ("manuais",))
+    assert agent.agent_slug == "suporte" and agent.has("write")
 
-    # isolamento: coleção não permitida e escrita sem escopo
+    # isolamento: escrita (documentos, memória, sessões, tarefas) exige o escopo `write`
+    readonly = agent_principal("suporte", {"read"}, ("manuais",))
+    with pytest.raises(PermissionDenied):
+        await documents.add_document(readonly, "manuais", "t", "c")
+    with pytest.raises(PermissionDenied):
+        await memory.remember(readonly, "Cliente ACME prefere e-mail")
+    with pytest.raises(PermissionDenied):
+        await memory.upsert_task(readonly, title="Ligar para a ACME")
+    with pytest.raises(PermissionDenied):
+        await memory.save_session(readonly, "Atendi a ACME.")
+
+    # isolamento: coleção não permitida e gestão de agentes
     with pytest.raises(PermissionDenied):
         await search.search_knowledge(agent, "x", collections=["vendas"])
-    with pytest.raises(PermissionDenied):
-        await documents.add_document(agent, "manuais", "t", "c")
     with pytest.raises(PermissionDenied):
         await agents.create_agent(agent, "outro", "Outro", "x")
 
@@ -131,3 +142,25 @@ async def test_proposals_autonomy_and_protected_fields():
     await agents.archive_agent(ADMIN, "financeiro", "teste")
     with pytest.raises(KBError):
         await memory.load_agent(agent, "financeiro")
+
+
+async def test_memory_merge_preserves_expiration():
+    await agents.create_agent(ADMIN, slug="memorias", name="Memórias", system_prompt="Guardo preferências.")
+    agent = agent_principal("memorias", {"read", "write"})
+
+    created = await memory.remember(agent, "Prefere café sem açúcar", kind="preference", expires_in_days=30)
+    assert created["action"] == "created"
+
+    # merge sem expires_in_days: a expiração existente deve ser preservada, não zerada
+    merged = await memory.remember(agent, "Prefere café sem açúcar!", kind="preference")
+    assert merged["action"] == "updated_existing" and merged["memory_id"] == created["memory_id"]
+    recalled = await memory.recall(agent, "café")
+    expires = datetime.fromisoformat(recalled[0]["expires_at"])
+    assert expires > datetime.now(UTC) + timedelta(days=29)
+
+    # merge com nova expiração: o valor informado vence sobre o existente
+    renewed = await memory.remember(agent, "Prefere café sem açúcar.", kind="preference", expires_in_days=5)
+    assert renewed["action"] == "updated_existing" and renewed["memory_id"] == created["memory_id"]
+    recalled = await memory.recall(agent, "café")
+    expires = datetime.fromisoformat(recalled[0]["expires_at"])
+    assert datetime.now(UTC) + timedelta(days=4) < expires < datetime.now(UTC) + timedelta(days=6)
