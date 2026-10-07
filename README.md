@@ -328,8 +328,8 @@ Os escopos abaixo continuam existindo **no perfil de cada agente** (`agents.scop
 
 | Escopo | Permite |
 |---|---|
-| `read` | consultar a base; ler e escrever a própria memória, as sessões e as tarefas |
-| `write` | inserir e atualizar documentos (inclui `read`) |
+| `read` | consultar a base e ler o próprio perfil, memórias, sessões e tarefas |
+| `write` | inserir e atualizar documentos, memórias, sessões e tarefas (inclui `read`) |
 | `agents:manage` | cadastrar e configurar agentes, aprovar propostas, ligar a autonomia |
 | `admin` | tudo, incluindo dar `agents:manage` ou `admin` a um agente |
 

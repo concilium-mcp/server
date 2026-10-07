@@ -108,7 +108,7 @@ async def remember(
     source: str | None = None,
     agent_slug: str | None = None,
 ) -> dict:
-    p.require("read")
+    p.require("write")
     if kind not in MEMORY_KINDS:
         raise KBError(f"kind inválido. Use um de {MEMORY_KINDS}.")
     if not 1 <= importance <= 5:
@@ -165,7 +165,7 @@ async def remember(
 
 
 async def forget(p: Principal, memory_id: int, replacement: str | None = None, agent_slug: str | None = None) -> dict:
-    p.require("read")
+    p.require("write")
     vector = await get_embedder().embed_one(replacement, "document") if replacement else None
     async with pool().acquire() as conn, conn.transaction():
         agent = await resolve_agent(conn, p, agent_slug)
@@ -202,7 +202,7 @@ async def save_session(
     metadata: dict | None = None,
     agent_slug: str | None = None,
 ) -> dict:
-    p.require("read")
+    p.require("write")
     if not summary.strip():
         raise KBError("summary é obrigatório.")
     async with pool().acquire() as conn, conn.transaction():
@@ -256,7 +256,7 @@ async def upsert_task(
     due_at: datetime | None = None,
     agent_slug: str | None = None,
 ) -> dict:
-    p.require("read")
+    p.require("write")
     if status is not None and status not in TASK_STATUSES:
         raise KBError(f"status inválido. Use um de {TASK_STATUSES}.")
     async with pool().acquire() as conn, conn.transaction():

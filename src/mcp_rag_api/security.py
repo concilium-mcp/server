@@ -1,8 +1,8 @@
 """Identidade (Principal), escopos e autenticação pela chave única do .env (KB_API_KEY).
 
 Escopos:
-  read           consultar a base e o próprio agente
-  write          inserir/atualizar documentos (implica read)
+  read           consultar a base e o próprio agente (perfil, memórias, sessões, tarefas)
+  write          inserir/atualizar documentos, memórias, sessões e tarefas (implica read)
   agents:manage  cadastrar/configurar agentes, aprovar propostas, ligar autonomia
   admin          tudo
 """
