@@ -4,6 +4,8 @@ import json
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from importlib import resources
+from pathlib import Path
 from typing import Any
 
 import asyncpg
@@ -13,23 +15,43 @@ from .config import get_settings
 
 _pool: asyncpg.Pool | None = None
 
+# Lock de sessão que serializa o runner de migrações entre processos
+# (rolling deploy ou --workers >1 subindo junto no mesmo banco). É um advisory
+# lock de sessão: se a conexão cair, o Postgres libera o lock sozinho.
+_MIGRATION_LOCK_KEY = 0x4B424D49  # "KBMI"
+
 
 async def _init_connection(conn: asyncpg.Connection) -> None:
     await register_vector(conn)
     await conn.set_type_codec("jsonb", encoder=json.dumps, decoder=json.loads, schema="pg_catalog")
 
 
+def _migrations_dir() -> Path:
+    """Diretório das migrações: MIGRATIONS_DIR (env) se definido, senão as do wheel."""
+    override = get_settings().migrations_dir
+    if override is not None:
+        return override
+    return Path(str(resources.files("mcp_rag_api"))) / "migrations"
+
+
 async def run_migrations(database_url: str | None = None) -> list[str]:
     settings = get_settings()
     conn = await asyncpg.connect(database_url or settings.database_url)
     applied: list[str] = []
+    # Sem este lock, dois processos subindo juntos em banco fresco (ex.: --workers >1
+    # ou rolling deploy) correm as migrações em paralelo. O CREATE TABLE IF NOT EXISTS
+    # da tabela de controle também fica sob o lock: IF NOT EXISTS não é atômico contra
+    # DDL concorrente (o Postgres falha com UniqueViolation no tipo composto da tabela).
+    # A leitura de schema_migrations precisa ser DEPOIS do lock, senão o segundo
+    # processo tenta reaplicar migrações que o primeiro acabou de aplicar.
+    await conn.fetchval("SELECT pg_advisory_lock($1)", _MIGRATION_LOCK_KEY)
     try:
         await conn.execute(
             "CREATE TABLE IF NOT EXISTS schema_migrations "
             "(name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())"
         )
         done = {r["name"] for r in await conn.fetch("SELECT name FROM schema_migrations")}
-        for path in sorted(settings.migrations_dir.glob("*.sql")):
+        for path in sorted(_migrations_dir().glob("*.sql")):
             if path.name in done:
                 continue
             async with conn.transaction():
@@ -37,6 +59,7 @@ async def run_migrations(database_url: str | None = None) -> list[str]:
                 await conn.execute("INSERT INTO schema_migrations (name) VALUES ($1)", path.name)
             applied.append(path.name)
     finally:
+        await conn.fetchval("SELECT pg_advisory_unlock($1)", _MIGRATION_LOCK_KEY)
         await conn.close()
     return applied
 
