@@ -4,6 +4,10 @@
 
 <h1 align="center">MCP RAG API</h1>
 
+<p align="center">
+  <a href="README.md">English</a> · <strong>Português</strong> · <a href="README.es.md">Español</a>
+</p>
+
 Servidor **MCP** e **API REST** em Python, com **PostgreSQL + pgvector**. Ele oferece duas coisas aos seus agentes de IA:
 
 - **Base de conhecimento (RAG):** documentos que qualquer agente consulta, insere e atualiza, com busca semântica e por palavra-chave, versionamento e aviso de duplicata.
@@ -31,6 +35,7 @@ Você gerencia tudo **conversando com o Claude**: cadastrar agentes, ajustar reg
 12. [Manutenção](#12-manutenção)
 13. [Problemas comuns](#13-problemas-comuns)
 14. [Deploy em produção (Coolify)](#14-deploy-em-produção-coolify)
+15. [Licença](#15-licença)
 
 ---
 
@@ -468,7 +473,6 @@ TEST_DATABASE_URL=postgresql://user:password@localhost:5432/kb_test uv run pytes
 | API em Docker não acessa o banco | container fora da rede `db_network` | confira `docker network ls` e o nome da rede no `docker-compose.yml` |
 | Porta 8000 ocupada | outro serviço usando a porta | `uv run mcp-rag-api serve --port 8010` e ajuste o `claude mcp add` |
 | Claude não vê as tools | servidor fora do ar ou header errado | `curl localhost:8000/health`, `claude mcp list`, confira o `Bearer` |
-| `401` no `/mcp` | chave ausente ou inválida: o `/mcp` inteiro exige chave, inclusive para listar as tools | confira o header `Authorization: Bearer <KB_API_KEY>` |
 
 ## 14. Deploy em produção (Coolify)
 
@@ -552,3 +556,7 @@ docker run --rm --network db_network -p 8000:8000 \
   -e DATABASE_URL=postgresql://user:password@db-postgres:5432/kb \
   --env-file .env mcp-rag-api:local
 ```
+
+## 15. Licença
+
+Este projeto é open source, sob a [Licença Apache 2.0](LICENSE).
