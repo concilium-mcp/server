@@ -1,4 +1,4 @@
-"""Identidade (Principal), escopos e autenticação pela chave única do .env (KB_API_KEY).
+"""Identidade (Principal), escopos e autenticação pelas chaves do .env (KB_API_KEY e KB_READ_ONLY_KEY).
 
 Escopos:
   read           consultar a base e o próprio agente (perfil, memórias, sessões, tarefas)
@@ -23,6 +23,10 @@ class KBError(Exception):
 
 class PermissionDenied(KBError):
     pass
+
+
+class Unauthenticated(KBError):
+    """Credencial ausente ou inválida (HTTP 401), distinta de escopo insuficiente (403)."""
 
 
 class NotFound(KBError):
@@ -80,8 +84,24 @@ def resolve_env_key(token: str) -> Principal:
     """Valida o Bearer token contra KB_API_KEY (comparação em tempo constante, sem query no banco)."""
     expected = get_settings().kb_api_key
     if not expected or not hmac.compare_digest(token.encode(), expected.encode()):
-        raise PermissionDenied("Chave de API inválida.")
+        raise Unauthenticated("Chave de API inválida.")
     return Principal(actor="env:kb_api_key", scopes=frozenset({"admin"}))
+
+
+def resolve_read_only_key(token: str) -> Principal:
+    """Valida o Bearer token contra KB_READ_ONLY_KEY (opcional): credencial genuinamente só de leitura."""
+    expected = get_settings().kb_read_only_key
+    if not expected or not hmac.compare_digest(token.encode(), expected.encode()):
+        raise Unauthenticated("Chave de API inválida.")
+    return Principal(actor="env:kb_read_only_key", scopes=frozenset({"read"}))
+
+
+def resolve_api_key(token: str) -> Principal:
+    """Aceita a chave admin (KB_API_KEY) ou a read-only (KB_READ_ONLY_KEY)."""
+    try:
+        return resolve_env_key(token)
+    except Unauthenticated:
+        return resolve_read_only_key(token)
 
 
 def bearer_token(authorization: str | None) -> str | None:

@@ -20,7 +20,7 @@ Você gerencia tudo **conversando com o Claude**: cadastrar agentes, ajustar reg
 1. [Pré-requisitos](#1-pré-requisitos)
 2. [Instalação](#2-instalação)
 3. [Configuração (.env)](#3-configuração-env)
-4. [Autenticação](#4-autenticação)
+4. [Autenticação e segurança](#4-autenticação-e-segurança)
 5. [Rodar o servidor](#5-rodar-o-servidor)
 6. [Conectar ao Claude](#6-conectar-ao-claude)
 7. [Tutorial: primeiro uso](#7-tutorial-primeiro-uso)
@@ -89,15 +89,18 @@ Outras opções do `.env` (os padrões costumam servir):
 
 | Variável | Padrão | Para quê |
 |---|---|---|
-| `KB_API_KEY` | (vazio) | a chave única do servidor — obrigatória em produção; veja o [passo 4](#4-autenticação) |
+| `KB_API_KEY` | (vazio) | a chave única do servidor — obrigatória em produção; veja o [passo 4](#4-autenticação-e-segurança) |
+| `KB_READ_ONLY_KEY` | (vazio) | chave opcional com escopo só de leitura, para integrações que só consultam; veja o [passo 4](#4-autenticação-e-segurança) |
 | `KB_AUTH_DISABLED` | `false` | `true` libera tudo sem chave — **só em desenvolvimento** |
+| `KB_DOCS_ENABLED` | `false` | `true` reativa `/docs` e `/openapi.json` — **só em desenvolvimento** |
+| `KB_MAX_BODY_BYTES` | `2097152` | limite de payload HTTP (2 MB); acima disso o servidor responde `413` |
 | `CHUNK_WORDS` / `CHUNK_OVERLAP_WORDS` | 450 / 60 | tamanho dos pedaços em que os documentos são quebrados |
 | `DUPLICATE_THRESHOLD` | 0.92 | similaridade a partir da qual o `add_document` avisa que o conteúdo é duplicado |
 | `LOAD_AGENT_MEMORY_LIMIT` | 15 | quantas memórias o agente recebe ao iniciar um chat |
 
-## 4. Autenticação
+## 4. Autenticação e segurança
 
-Este servidor tem **uma chave só**, definida no `.env`:
+Este servidor tem **uma chave principal**, definida no `.env`:
 
 ```env
 KB_API_KEY=coloque-uma-chave-longa-e-aleatória
@@ -110,6 +113,16 @@ python -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
 
 Todo acesso — REST e MCP, HTTP e stdio — exige o header `Authorization: Bearer <KB_API_KEY>` (exceto o `/health`). Em desenvolvimento você pode pôr `KB_AUTH_DISABLED=true` no `.env` para operar sem o header.
+
+Semântica dos erros: chave **ausente ou inválida** → `401` com `WWW-Authenticate: Bearer`; chave válida com **escopo insuficiente** → `403`.
+
+### Segurança
+
+- **Rotação da `KB_API_KEY`:** para trocar a chave, gere uma nova, atualize o `.env` (ou as variáveis do app no Coolify) e rode o deploy. Como a validação é contra o valor do ambiente — sem tabela de chaves — a chave antiga morre no momento do deploy. Clientes desatualizados passam a receber `401`.
+- **Raio de explosão:** a `KB_API_KEY` é **admin total** — quem a tem lê, escreve, gerencia agentes e liga autonomia. Trate-a como um segredo de raiz: não a distribua para integrações, não a commite, não a use em URLs ou logs.
+- **`KB_READ_ONLY_KEY`:** segunda chave opcional do `.env` que autentica com escopo **apenas `read`** — quem a usa consulta a base mas não escreve documentos nem gerencia agentes. Use para integrações de leitura (busca em scripts, dashboards, ferramentas de consulta) e para qualquer lugar onde a chave possa vazar com dano mínimo.
+- **`KB_DOCS_ENABLED`:** `/docs` e `/openapi.json` vêm **desligados por padrão** (a documentação revela a superfície inteira da API). Em dev, `KB_DOCS_ENABLED=true` reativa o Swagger; em produção, deixe desligado.
+- **Limite de payload:** `KB_MAX_BODY_BYTES` (padrão 2 MB) rejeita com `413` requests grandes demais, protegendo `POST /documents` e `/search` de custo descontrolado de embeddings/memória.
 
 ## 5. Rodar o servidor
 
@@ -132,7 +145,7 @@ Para conferir se está no ar:
 curl http://localhost:8000/health        # {"status":"ok"}
 ```
 
-- Documentação interativa da API REST: http://localhost:8000/docs
+- Documentação interativa da API REST: http://localhost:8000/docs — **só com `KB_DOCS_ENABLED=true`** (desligada por padrão)
 - Endpoint MCP: http://localhost:8000/mcp
 
 ## 6. Conectar ao Claude
@@ -292,7 +305,7 @@ Pedidos no chat, com o `KB_API_KEY`:
 
 ## 10. Usar pela API REST
 
-Todas as rotas exigem `Authorization: Bearer <KB_API_KEY>`. A lista completa, com formulário de teste, está em http://localhost:8000/docs.
+Todas as rotas exigem `Authorization: Bearer <KB_API_KEY>` (ou `Bearer <KB_READ_ONLY_KEY>` para consultas). A lista completa, com formulário de teste, está em http://localhost:8000/docs — disponível só quando `KB_DOCS_ENABLED=true`.
 
 ```bash
 KEY=$KB_API_KEY
@@ -322,7 +335,12 @@ curl -s -X PUT $API/agents/suporte/autonomy -H "Authorization: Bearer $KEY" -H "
 
 ### Autenticação e escopos
 
-Esta versão enxuta do servidor aceita **apenas a chave única do `.env`** (`KB_API_KEY`), que opera com escopo `admin` — ou seja, tudo liberado. Não existe emissão de chaves por agente.
+Esta versão enxuta do servidor aceita **chaves do `.env`**, sem tabela de chaves no banco nem emissão de chaves por agente:
+
+- `KB_API_KEY` — a chave principal, com escopo `admin` (tudo liberado);
+- `KB_READ_ONLY_KEY` (opcional) — autentica com escopo apenas `read`: consulta a base, mas não escreve documentos nem gerencia agentes.
+
+Chave ausente ou inválida → `401` com `WWW-Authenticate: Bearer`; escopo insuficiente → `403`.
 
 Os escopos abaixo continuam existindo **no perfil de cada agente** (`agents.scopes`, `agents.allowed_collections`): documentam a intenção de permissão do agente e são usados pela versão completa (web-server), mas não restringem o acesso neste servidor:
 
@@ -459,7 +477,7 @@ O primeiro push na `main` já roda os testes (unitários e de integração, com 
 
 ### 14.4 Autenticação em produção
 
-A única chave do servidor é o `KB_API_KEY`, definido nas **Environment Variables** do app no Coolify (passo 14.3). Gere uma forte, salve e rode o deploy. Para conectar:
+As chaves do servidor são definidas nas **Environment Variables** do app no Coolify (passo 14.3): a principal, `KB_API_KEY` (admin total), e — opcionalmente — `KB_READ_ONLY_KEY`, com escopo só de leitura para integrações que só consultam. Gere uma forte, salve e rode o deploy. Para conectar:
 
 ```bash
 curl https://kb.seudominio.com/health          # {"status":"ok"}
@@ -471,7 +489,7 @@ A partir daí, tudo segue como nos tutoriais 7 a 9.
 
 ### 14.5 Cuidados
 
-- **Segurança:** o `/mcp` inteiro exige chave válida (sem chave, responde `401`, inclusive para listar tools). A API REST também exige chave, e só o `/health` é público.
+- **Segurança:** o `/mcp` inteiro exige chave válida (sem chave, responde `401`, inclusive para listar tools). A API REST também exige chave, e só o `/health` é público. Chave inválida/ausente → `401` com `WWW-Authenticate: Bearer`; escopo insuficiente → `403`. `/docs` e `/openapi.json` vêm desligados por padrão (`KB_DOCS_ENABLED`); não os reative em produção. Payloads acima de `KB_MAX_BODY_BYTES` (padrão 2 MB) são rejeitados com `413`. Roteie a `KB_API_KEY` periodicamente — basta trocar o valor e rodar o deploy.
 - **Cloudflare Access:** se o domínio estiver protegido pelo Access, os clientes MCP (Claude Code, Desktop, API) não passam pela tela de login. Crie uma regra *Bypass* para `kb.seudominio.com/mcp` e `/health`; a autenticação fica a cargo do `KB_API_KEY`.
 - **Embeddings locais:** com `INSTALL_LOCAL_EMBEDDINGS=true` a imagem inclui PyTorch e o modelo precisa de cerca de 2–3 GB de RAM. Prefira `voyage` ou `openai` em VPS pequena.
 - **Backup:** ative os backups agendados do banco no Coolify (**Database → Backups**).
