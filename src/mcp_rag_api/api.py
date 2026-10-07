@@ -257,9 +257,7 @@ async def agent_context(slug: str, p: Principal = Auth) -> dict:
 
 
 @router.get("/agents/{slug}/memories")
-async def recall(
-    slug: str, query: str, include_shared: bool = True, limit: int = 8, p: Principal = Auth
-) -> list[dict]:
+async def recall(slug: str, query: str, include_shared: bool = True, limit: int = 8, p: Principal = Auth) -> list[dict]:
     return await memory.recall(p, query, slug, include_shared, limit)
 
 
