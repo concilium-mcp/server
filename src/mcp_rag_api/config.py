@@ -32,8 +32,11 @@ class Settings(BaseSettings):
     load_agent_memory_limit: int = 15
 
     kb_api_key: str = ""
+    kb_read_only_key: str = ""
     kb_auth_disabled: bool = False
     kb_log_level: str = "INFO"
+    kb_docs_enabled: bool = False
+    kb_max_body_bytes: int = 2 * 1024 * 1024
 
     @field_validator("duplicate_threshold", "memory_duplicate_threshold")
     @classmethod

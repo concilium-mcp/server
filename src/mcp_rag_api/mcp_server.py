@@ -13,7 +13,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from . import db
 from .config import get_settings
 from .core import agents, documents, memory, search
-from .security import DEV_PRINCIPAL, KBError, PermissionDenied, Principal, bearer_token, resolve_env_key
+from .security import DEV_PRINCIPAL, KBError, Principal, Unauthenticated, bearer_token, resolve_api_key
 
 INSTRUCTIONS = """\
 Base de conhecimento compartilhada + registro de agentes.
@@ -53,10 +53,10 @@ async def current_principal(ctx: Context) -> Principal:
     else:  # stdio
         token = settings.kb_api_key or None
     if token:
-        return resolve_env_key(token)
+        return resolve_api_key(token)
     if settings.kb_auth_disabled:
         return DEV_PRINCIPAL
-    raise PermissionDenied("Autenticação necessária: envie 'Authorization: Bearer <chave>' (ou KB_API_KEY no stdio).")
+    raise Unauthenticated("Autenticação necessária: envie 'Authorization: Bearer <chave>' (ou KB_API_KEY no stdio).")
 
 
 P = ParamSpec("P")
