@@ -64,6 +64,9 @@ def main() -> None:
         case "serve":
             import uvicorn
 
+            from .logging_config import setup_logging
+
+            setup_logging()
             uvicorn.run("mcp_rag_api.main:app", host=args.host, port=args.port, reload=args.reload)
         case "stdio":
             from .mcp_server import mcp
