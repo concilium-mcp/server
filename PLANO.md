@@ -1,5 +1,7 @@
 # Plano — MCP RAG API (Python + PostgreSQL + pgvector)
 
+> ⚠️ **Documento histórico do design original (import inicial).** A auth atual do server é só a chave única `KB_API_KEY` do env (sem tabela `api_keys` nem prefixo `kb_sk_`) — a fonte da verdade é o [README](README.md) + o código.
+
 > Servidor MCP em Python que dá aos agentes de IA (Claude e nossos agentes) uma **memória/base de conhecimento compartilhada**: consultar (RAG), inserir e atualizar conhecimento, com PostgreSQL + pgvector como armazenamento.
 
 ---

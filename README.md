@@ -4,78 +4,83 @@
 
 <h1 align="center">MCP RAG API</h1>
 
-Servidor **MCP** e **API REST** em Python, com **PostgreSQL + pgvector**. Ele oferece duas coisas aos seus agentes de IA:
+<p align="center">
+  <strong>English</strong> · <a href="README.pt-BR.md">Português</a> · <a href="README.es.md">Español</a>
+</p>
 
-- **Base de conhecimento (RAG):** documentos que qualquer agente consulta, insere e atualiza, com busca semântica e por palavra-chave, versionamento e aviso de duplicata.
-- **Registro de agentes:** cada agente tem perfil (instruções), memória, resumos de sessão e tarefas guardados no banco. Um chat novo carrega tudo isso e continua de onde parou.
+A Python **MCP** server and **REST API** built on **PostgreSQL + pgvector**. It gives your AI agents two things:
 
-Você gerencia tudo **conversando com o Claude**: cadastrar agentes, ajustar regras, aprovar mudanças e liberar autonomia.
+- **Knowledge base (RAG):** documents that any agent can query, insert and update, with semantic and keyword search, versioning and duplicate warnings.
+- **Agent registry:** each agent has a profile (instructions), memory, session summaries and tasks stored in the database. A new chat loads all of that and picks up where the last one left off.
 
-> Arquitetura e decisões: [PLANO.md](PLANO.md)
+You manage everything **by talking to Claude**: registering agents, adjusting rules, approving changes and granting autonomy.
 
----
-
-## Sumário
-
-1. [Pré-requisitos](#1-pré-requisitos)
-2. [Instalação](#2-instalação)
-3. [Configuração (.env)](#3-configuração-env)
-4. [Autenticação e segurança](#4-autenticação-e-segurança)
-5. [Rodar o servidor](#5-rodar-o-servidor)
-6. [Conectar ao Claude](#6-conectar-ao-claude)
-7. [Tutorial: primeiro uso](#7-tutorial-primeiro-uso)
-8. [Tutorial: cadastrar e usar um agente](#8-tutorial-cadastrar-e-usar-um-agente)
-9. [Tutorial: autonomia e propostas](#9-tutorial-autonomia-e-propostas)
-10. [Usar pela API REST](#10-usar-pela-api-rest)
-11. [Referência](#11-referência)
-12. [Manutenção](#12-manutenção)
-13. [Problemas comuns](#13-problemas-comuns)
-14. [Deploy em produção (Coolify)](#14-deploy-em-produção-coolify)
+> Architecture and design decisions: [PLANO.md](PLANO.md) (Portuguese)
 
 ---
 
-## 1. Pré-requisitos
+## Contents
 
-| O quê | Para quê | Como conferir |
+1. [Prerequisites](#1-prerequisites)
+2. [Installation](#2-installation)
+3. [Configuration (.env)](#3-configuration-env)
+4. [Authentication](#4-authentication)
+5. [Running the server](#5-running-the-server)
+6. [Connecting to Claude](#6-connecting-to-claude)
+7. [Tutorial: first use](#7-tutorial-first-use)
+8. [Tutorial: registering and using an agent](#8-tutorial-registering-and-using-an-agent)
+9. [Tutorial: autonomy and proposals](#9-tutorial-autonomy-and-proposals)
+10. [Using the REST API](#10-using-the-rest-api)
+11. [Reference](#11-reference)
+12. [Maintenance](#12-maintenance)
+13. [Common problems](#13-common-problems)
+14. [Production deployment (Coolify)](#14-production-deployment-coolify)
+15. [License](#15-license)
+
+---
+
+## 1. Prerequisites
+
+| What | Why | How to check |
 |---|---|---|
-| Postgres do **DB-DOCKER** rodando | banco (container `db-postgres`, imagem pgvector, porta 5432) | `docker ps --filter name=db-postgres` |
-| [uv](https://docs.astral.sh/uv/) | instala o Python e as dependências | `uv --version` |
-| Docker | só se for rodar a API em container | `docker --version` |
-| Claude Code (ou Claude Desktop) | conversar com o MCP | `claude --version` |
-| Chave de um provedor de embeddings | transformar texto em vetores | veja o [passo 3](#3-configuração-env) |
+| DB-DOCKER **Postgres** running | database (container `db-postgres`, pgvector image, port 5432) | `docker ps --filter name=db-postgres` |
+| [uv](https://docs.astral.sh/uv/) | installs Python and the dependencies | `uv --version` |
+| Docker | only if you will run the API in a container | `docker --version` |
+| Claude Code (or Claude Desktop) | to talk to the MCP server | `claude --version` |
+| An embeddings provider key | to turn text into vectors | see [step 3](#3-configuration-env) |
 
-Este projeto **não sobe banco próprio**: ele usa um database `kb` dentro do Postgres compartilhado.
+This project **does not start its own database**: it uses a `kb` database inside the shared Postgres.
 
-## 2. Instalação
+## 2. Installation
 
 ```bash
 cd /mnt/l/Workspace/PERSON/concilium/server
 
-# cria o database do projeto no Postgres compartilhado (só na primeira vez)
+# creates the project database in the shared Postgres (first time only)
 docker exec db-postgres psql -U user -d defaultdb -c "CREATE DATABASE kb"
 
-# instala as dependências
+# installs the dependencies
 uv sync
 ```
 
-As tabelas são criadas sozinhas quando o servidor sobe pela primeira vez.
+Tables are created automatically the first time the server starts.
 
-## 3. Configuração (.env)
+## 3. Configuration (.env)
 
 ```bash
 cp .env.example .env
 ```
 
-Abra o `.env` e defina **pelo menos** o provedor de embeddings:
+Open `.env` and set **at least** the embeddings provider:
 
-| `EMBEDDING_PROVIDER` | Precisa de | Observação |
+| `EMBEDDING_PROVIDER` | Requires | Notes |
 |---|---|---|
-| `voyage` (padrão) | `VOYAGE_API_KEY` | chave em voyageai.com |
-| `openai` | `OPENAI_API_KEY` | modelo `text-embedding-3-small` |
-| `local` | `uv sync --extra local` | roda na sua máquina (modelo BAAI/bge-m3, ~2 GB, bom em português); sem custo, mais lento |
-| `fake` | nada | **só para testar a instalação**: a busca não entende significado |
+| `voyage` (default) | `VOYAGE_API_KEY` | key from voyageai.com |
+| `openai` | `OPENAI_API_KEY` | model `text-embedding-3-small` |
+| `local` | `uv sync --extra local` | runs on your machine (BAAI/bge-m3 model, ~2 GB, good at Portuguese); free, slower |
+| `fake` | nothing | **only to test the installation**: search has no semantic understanding |
 
-Exemplo:
+Example:
 
 ```env
 DATABASE_URL=postgresql://user:password@localhost:5432/kb
@@ -83,72 +88,59 @@ EMBEDDING_PROVIDER=voyage
 VOYAGE_API_KEY=pa-xxxxxxxx
 ```
 
-> ⚠️ Escolha o provedor antes de inserir documentos. Os vetores de provedores diferentes não são compatíveis, e ainda não existe um comando de reindexação.
+> ⚠️ Choose the provider before inserting documents. Vectors from different providers are not compatible, and there is no reindex command yet.
 
-Outras opções do `.env` (os padrões costumam servir):
+Other `.env` options (the defaults usually work):
 
-| Variável | Padrão | Para quê |
+| Variable | Default | Purpose |
 |---|---|---|
-| `KB_API_KEY` | (vazio) | a chave única do servidor — obrigatória em produção; veja o [passo 4](#4-autenticação-e-segurança) |
-| `KB_READ_ONLY_KEY` | (vazio) | chave opcional com escopo só de leitura, para integrações que só consultam; veja o [passo 4](#4-autenticação-e-segurança) |
-| `KB_AUTH_DISABLED` | `false` | `true` libera tudo sem chave — **só em desenvolvimento** |
-| `KB_DOCS_ENABLED` | `false` | `true` reativa `/docs` e `/openapi.json` — **só em desenvolvimento** |
-| `KB_MAX_BODY_BYTES` | `2097152` | limite de payload HTTP (2 MB); acima disso o servidor responde `413` |
-| `CHUNK_WORDS` / `CHUNK_OVERLAP_WORDS` | 450 / 60 | tamanho dos pedaços em que os documentos são quebrados |
-| `DUPLICATE_THRESHOLD` | 0.92 | similaridade a partir da qual o `add_document` avisa que o conteúdo é duplicado |
-| `LOAD_AGENT_MEMORY_LIMIT` | 15 | quantas memórias o agente recebe ao iniciar um chat |
+| `KB_API_KEY` | (empty) | the server's single key — required in production; see [step 4](#4-authentication) |
+| `KB_AUTH_DISABLED` | `false` | `true` allows everything without a key — **development only** |
+| `CHUNK_WORDS` / `CHUNK_OVERLAP_WORDS` | 450 / 60 | size of the pieces documents are split into |
+| `DUPLICATE_THRESHOLD` | 0.92 | similarity at which `add_document` warns that the content is a duplicate |
+| `LOAD_AGENT_MEMORY_LIMIT` | 15 | how many memories the agent receives when starting a chat |
 
-## 4. Autenticação e segurança
+## 4. Authentication
 
-Este servidor tem **uma chave principal**, definida no `.env`:
+This server has **a single key**, defined in `.env`:
 
 ```env
-KB_API_KEY=coloque-uma-chave-longa-e-aleatória
+KB_API_KEY=put-a-long-random-key-here
 ```
 
-Gere uma forte com:
+Generate a strong one with:
 
 ```bash
 python -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
 
-Todo acesso — REST e MCP, HTTP e stdio — exige o header `Authorization: Bearer <KB_API_KEY>` (exceto o `/health`). Em desenvolvimento você pode pôr `KB_AUTH_DISABLED=true` no `.env` para operar sem o header.
+Every access — REST and MCP, HTTP and stdio — requires the `Authorization: Bearer <KB_API_KEY>` header (except `/health`). In development you can set `KB_AUTH_DISABLED=true` in `.env` to operate without the header.
 
-Semântica dos erros: chave **ausente ou inválida** → `401` com `WWW-Authenticate: Bearer`; chave válida com **escopo insuficiente** → `403`.
+## 5. Running the server
 
-### Segurança
-
-- **Rotação da `KB_API_KEY`:** para trocar a chave, gere uma nova, atualize o `.env` (ou as variáveis do app no Coolify) e rode o deploy. Como a validação é contra o valor do ambiente — sem tabela de chaves — a chave antiga morre no momento do deploy. Clientes desatualizados passam a receber `401`.
-- **Raio de explosão:** a `KB_API_KEY` é **admin total** — quem a tem lê, escreve, gerencia agentes e liga autonomia. Trate-a como um segredo de raiz: não a distribua para integrações, não a commite, não a use em URLs ou logs.
-- **`KB_READ_ONLY_KEY`:** segunda chave opcional do `.env` que autentica com escopo **apenas `read`** — quem a usa consulta a base mas não escreve documentos nem gerencia agentes. Use para integrações de leitura (busca em scripts, dashboards, ferramentas de consulta) e para qualquer lugar onde a chave possa vazar com dano mínimo.
-- **`KB_DOCS_ENABLED`:** `/docs` e `/openapi.json` vêm **desligados por padrão** (a documentação revela a superfície inteira da API). Em dev, `KB_DOCS_ENABLED=true` reativa o Swagger; em produção, deixe desligado.
-- **Limite de payload:** `KB_MAX_BODY_BYTES` (padrão 2 MB) rejeita com `413` requests grandes demais, protegendo `POST /documents` e `/search` de custo descontrolado de embeddings/memória.
-
-## 5. Rodar o servidor
-
-**Opção A: local (desenvolvimento)**
+**Option A: local (development)**
 
 ```bash
-uv run mcp-rag-api serve            # adicione --reload para reiniciar ao editar o código
+uv run mcp-rag-api serve            # add --reload to restart when the code changes
 ```
 
-**Opção B: Docker (só a API; o banco continua sendo o `db-postgres`; usa o mesmo `Dockerfile.coolify` da produção)**
+**Option B: Docker (API only; the database is still `db-postgres`; uses the same `Dockerfile.coolify` as production)**
 
 ```bash
 docker compose up -d --build
 docker compose logs -f api
 ```
 
-Para conferir se está no ar:
+To check it is up:
 
 ```bash
 curl http://localhost:8000/health        # {"status":"ok"}
 ```
 
-- Documentação interativa da API REST: http://localhost:8000/docs — **só com `KB_DOCS_ENABLED=true`** (desligada por padrão)
-- Endpoint MCP: http://localhost:8000/mcp
+- Interactive REST API docs: http://localhost:8000/docs
+- MCP endpoint: http://localhost:8000/mcp
 
-## 6. Conectar ao Claude
+## 6. Connecting to Claude
 
 ### Claude Code
 
@@ -157,11 +149,11 @@ claude mcp add --transport http kb http://localhost:8000/mcp \
   --header "Authorization: Bearer $KB_API_KEY"
 ```
 
-Confira com `claude mcp list` (deve aparecer `kb` conectado). Dentro do Claude Code, o comando `/mcp` mostra as tools.
+Check with `claude mcp list` (`kb` should show as connected). Inside Claude Code, the `/mcp` command shows the tools.
 
-### Claude Desktop (Windows, com o projeto no WSL)
+### Claude Desktop (Windows, with the project on WSL)
 
-Edite `%APPDATA%\Claude\claude_desktop_config.json`:
+Edit `%APPDATA%\Claude\claude_desktop_config.json`:
 
 ```json
 {
@@ -174,377 +166,322 @@ Edite `%APPDATA%\Claude\claude_desktop_config.json`:
 }
 ```
 
-Reinicie o Claude Desktop. Nesse modo (stdio) o servidor HTTP não precisa estar rodando: o Desktop inicia o processo sozinho, e a autenticação usa o `KB_API_KEY` do `.env`.
+Restart Claude Desktop. In this mode (stdio) the HTTP server does not need to be running: the Desktop starts the process itself, and authentication uses the `KB_API_KEY` from `.env`.
 
-### Seus próprios agentes (Claude API / Agent SDK)
+### Your own agents (Claude API / Agent SDK)
 
-Aponte o cliente MCP para `https://SEU_DOMINIO/mcp` com o header `Authorization: Bearer <KB_API_KEY>`. Para produção, veja o [deploy no Coolify](#14-deploy-em-produção-coolify).
+Point the MCP client to `https://YOUR_DOMAIN/mcp` with the `Authorization: Bearer <KB_API_KEY>` header. For production, see [deploying on Coolify](#14-production-deployment-coolify).
 
-## 7. Tutorial: primeiro uso
+## 7. Tutorial: first use
 
-Com o Claude Code conectado (passo 6), converse normalmente. Os exemplos abaixo são pedidos que você digita no chat, seguidos da tool que o Claude chama.
+With Claude Code connected (step 6), just talk normally. The examples below are requests you type in the chat, followed by the tool Claude calls.
 
-**1. Criar uma coleção**
-> Crie uma coleção chamada "manuais" para os manuais internos.
+**1. Create a collection**
+> Create a collection called "manuals" for our internal manuals.
 
 → `create_collection`
 
-**2. Inserir conhecimento**
-> Adicione na coleção manuais: "Política de reembolso: o cliente pode pedir reembolso em até 7 dias após a compra, pelo portal, informando o número do pedido."
+**2. Insert knowledge**
+> Add to the manuals collection: "Refund policy: customers can request a refund within 7 days of purchase, through the portal, informing the order number."
 
-→ `add_document`. Se já existir algo muito parecido, o servidor **não duplica**: ele devolve o documento semelhante, e o Claude sugere atualizar esse documento.
+→ `add_document`. If something very similar already exists, the server **does not duplicate**: it returns the similar document, and Claude suggests updating that one instead.
 
-**3. Consultar**
-> Qual o prazo de reembolso? Responda citando a fonte.
+**3. Query**
+> What is the refund window? Answer citing the source.
 
-→ `search_knowledge`. A resposta vem com título e `document_id`. O prompt `/mcp__kb__answer_with_sources` já instrui o Claude a responder assim.
+→ `search_knowledge`. The answer comes with title and `document_id`. The `/mcp__kb__answer_with_sources` prompt already instructs Claude to answer this way.
 
-**4. Atualizar**
-> O prazo de reembolso mudou para 30 dias, atualize o documento.
+**4. Update**
+> The refund window changed to 30 days, update the document.
 
-→ `update_document` com `change_note`. Isso gera a versão 2, e a anterior fica no histórico (`document_history`).
+→ `update_document` with `change_note`. This creates version 2, and the previous one stays in history (`document_history`).
 
-**5. Sincronizar de outro sistema**
-Use `upsert_document` com um `external_id` (por exemplo, o id no CRM). Se o documento já existir, ele é atualizado; se não, é criado.
+**5. Sync from another system**
+Use `upsert_document` with an `external_id` (for example, the id in your CRM). If the document already exists, it is updated; if not, it is created.
 
-## 8. Tutorial: cadastrar e usar um agente
+## 8. Tutorial: registering and using an agent
 
-### 8.1 Cadastro, conversando com o Claude
+### 8.1 Registering, by talking to Claude
 
-No Claude Code conectado com o `KB_API_KEY`, digite:
+In Claude Code connected with the `KB_API_KEY`, type:
 
 ```
 /mcp__kb__design_agent
 ```
 
-ou simplesmente:
+or simply:
 
-> Cadastre um agente de suporte pós-venda, tom cordial, que só usa a coleção manuais e nunca promete reembolso sem consultar a política.
+> Register a post-sales support agent, cordial tone, that only uses the manuals collection and never promises a refund without checking the policy.
 
-O Claude vai:
-1. perguntar o que faltar (objetivo, tom, regras, coleções, permissões, autonomia);
-2. mostrar o perfil montado (slug, system prompt, coleções e escopos) e **pedir sua confirmação**;
-3. chamar `create_agent` e entregar o **slug** do agente cadastrado.
+Claude will:
+1. ask whatever is missing (goal, tone, rules, collections, permissions, autonomy);
+2. show you the assembled profile (slug, system prompt, collections and scopes) and **ask for your confirmation**;
+3. call `create_agent` and hand you the agent's **slug**.
 
-Para usar o agente, a conexão é a mesma de sempre (o `KB_API_KEY` é a única chave do servidor): conecte o cliente MCP e peça para o Claude iniciar como o agente com o prompt `start_as_agent <slug>` (ou o comando `/mcp__kb__start_as_agent <slug>`), que chama `load_agent` e assume o perfil dele.
+To use the agent, the connection is the same as always (`KB_API_KEY` is the server's only key): connect the MCP client and ask Claude to start as the agent with the `start_as_agent <slug>` prompt (or the `/mcp__kb__start_as_agent <slug>` command), which calls `load_agent` and assumes its profile.
 
-Você pode semear memórias e tarefas no mesmo momento:
-> Adicione ao agente suporte a memória "cliente ACME prefere WhatsApp" e a tarefa "revisar FAQ até sexta".
+You can seed memories and tasks at the same time:
+> Add to the support agent the memory "client ACME prefers WhatsApp" and the task "review the FAQ by Friday".
 
-→ `add_agent_memory` e `add_agent_task`
+→ `add_agent_memory` and `add_agent_task`
 
-### 8.2 Usar o agente
+### 8.2 Using the agent
 
-Em um chat conectado ao servidor, peça: *"carregue seu perfil"* e informe o slug (ou use `/mcp__kb__start_as_agent suporte`). O Claude chama `load_agent` e recebe:
-- o perfil (system prompt, versão, regras);
-- as memórias mais importantes;
-- o **resumo da última sessão** e os próximos passos;
-- as tarefas abertas.
+In a chat connected to the server, ask: *"load your profile"* and provide the slug (or use `/mcp__kb__start_as_agent support`). Claude calls `load_agent` and receives:
+- the profile (system prompt, version, rules);
+- the most important memories;
+- the **last session summary** and the next steps;
+- the open tasks.
 
-Durante o trabalho, o agente usa:
+During the work, the agent uses:
 
-| Situação | Tool |
+| Situation | Tool |
 |---|---|
-| consultar a base | `search_knowledge` |
-| lembrar algo específico | `recall` |
-| aprendeu algo durável | `remember` (se já existir memória parecida, ela é atualizada em vez de duplicada) |
-| memória errada | `forget` (apaga ou corrige) |
-| pendência nova ou concluída | `upsert_task` |
-| fim do chat ou um marco | `save_session` com resumo e próximos passos |
+| query the knowledge base | `search_knowledge` |
+| remember something specific | `recall` |
+| learned something durable | `remember` (if a similar memory already exists, it is updated instead of duplicated) |
+| wrong memory | `forget` (deletes or fixes) |
+| new or completed task | `upsert_task` |
+| end of chat or a milestone | `save_session` with summary and next steps |
 
-No dia seguinte, em outro chat (ou em outra ferramenta), `load_agent` traz tudo de volta.
+The next day, in another chat (or another tool), `load_agent` brings it all back.
 
-> Dica: o prompt `/mcp__kb__save_learning` pede ao agente que revise a conversa e salve memórias, documentos, tarefas e o resumo de uma vez.
+> Tip: the `/mcp__kb__save_learning` prompt asks the agent to review the conversation and save memories, documents, tasks and the summary in one go.
 
-### 8.3 Ajustar o agente depois
+### 8.3 Adjusting the agent later
 
-Com o `KB_API_KEY`:
+With the `KB_API_KEY`:
 
-| Pedido no chat | Tool |
+| Request in the chat | Tool |
 |---|---|
-| "No agente suporte, adicione a regra: sempre confirmar o número do pedido." | `update_agent` (gera nova versão) |
-| "Mostre o histórico do agente suporte." | `get_agent` |
-| "Volte o suporte para a versão 2." | `restore_agent_version` |
-| "Crie um agente suporte-vip a partir do suporte, com tom mais formal." | `clone_agent` |
-| "Desative o agente suporte." | `archive_agent` |
+| "In the support agent, add the rule: always confirm the order number." | `update_agent` (creates a new version) |
+| "Show the support agent's history." | `get_agent` |
+| "Roll support back to version 2." | `restore_agent_version` |
+| "Create a support-vip agent from support, with a more formal tone." | `clone_agent` |
+| "Deactivate the support agent." | `archive_agent` |
 
-### 8.4 Opcional: subagentes do Claude Code
+### 8.4 Optional: Claude Code subagents
 
 ```bash
 uv run mcp-rag-api sync-agents
 ```
 
-Gera `.claude/agents/<slug>.md` a partir do banco, para usar os agentes como subagentes do Claude Code. A fonte da verdade continua sendo o banco: rode de novo depois de alterar um agente.
+Generates `.claude/agents/<slug>.md` from the database, to use the agents as Claude Code subagents. The source of truth remains the database: run it again after changing an agent.
 
-## 9. Tutorial: autonomia e propostas
+## 9. Tutorial: autonomy and proposals
 
-Um agente pode sugerir mudanças no próprio perfil com `propose_agent_update`. O que acontece depende da **autonomia**, que só você controla:
+An agent can suggest changes to its own profile with `propose_agent_update`. What happens depends on **autonomy**, which only you control:
 
-| Autonomia | O que acontece com a proposta |
+| Autonomy | What happens to the proposal |
 |---|---|
-| **desligada** (padrão) | fica pendente até você aprovar |
-| **ligada** | é aplicada na hora como nova versão (e continua no histórico) |
+| **off** (default) | stays pending until you approve it |
+| **on** | is applied right away as a new version (and remains in history) |
 
-Pedidos no chat, com o `KB_API_KEY`:
+Requests in the chat, with the `KB_API_KEY`:
 
-> Pode deixar o agente suporte se atualizar sozinho.
+> Let the support agent update itself.
 
 → `set_agent_autonomy(auto_apply_updates=true)`
 
-> Desligue a autoatualização do suporte.
+> Turn off support's self-updates.
 
-> Tem proposta de mudança pendente?
+> Is there a pending change proposal?
 
 → `list_agent_proposals`
 
-> Aprove a proposta 3. / Rejeite a proposta 4, motivo: tom informal demais.
+> Approve proposal 3. / Reject proposal 4, reason: tone too informal.
 
 → `review_agent_update`
 
-**Travas de segurança:** o agente **nunca** consegue ligar a própria autonomia nem mudar as próprias permissões ou coleções. Esses campos são ignorados nas propostas dele, e as tools de gestão exigem o escopo `agents:manage`.
+**Safety locks:** the agent can **never** turn on its own autonomy nor change its own permissions or collections. Those fields are ignored in its proposals, and the management tools require the `agents:manage` scope.
 
-## 10. Usar pela API REST
+## 10. Using the REST API
 
-Todas as rotas exigem `Authorization: Bearer <KB_API_KEY>` (ou `Bearer <KB_READ_ONLY_KEY>` para consultas). A lista completa, com formulário de teste, está em http://localhost:8000/docs — disponível só quando `KB_DOCS_ENABLED=true`.
-
-A REST espelha as tools MCP — mesmas funções de `core/`, mesma autenticação e escopos:
-
-| Método | Rota | Espelha a tool | O que faz |
-|---|---|---|---|
-| `GET` | `/health` | — | status do servidor (público) |
-| `GET` | `/collections` | `list_collections` | lista as coleções acessíveis |
-| `POST` | `/collections` | `create_collection` | cria/atualiza descrição de coleção |
-| `POST` | `/search` | `search_knowledge` | busca híbrida na base |
-| `GET` | `/documents` | `list_documents` | lista documentos (filtros por coleção/tags/status) |
-| `POST` | `/documents` | `add_document` | insere documento novo (avisa duplicata) |
-| `PUT` | `/documents/upsert` | `upsert_document` | cria ou atualiza por `external_id` (sincronização) |
-| `GET` | `/documents/{id}` | `get_document` | documento completo |
-| `PATCH` | `/documents/{id}` | `update_document` | atualiza e gera nova versão |
-| `DELETE` | `/documents/{id}` | `archive_document` | arquiva o documento |
-| `GET` | `/documents/{id}/versions` | `document_history` | histórico de versões |
-| `GET` | `/agents` | `list_agents` | lista os agentes |
-| `POST` | `/agents` | `create_agent` | cadastra agente |
-| `GET` | `/agents/proposals` | `list_agent_proposals` | propostas pendentes |
-| `POST` | `/agents/proposals/{id}/review` | `review_agent_update` | aprova/rejeita proposta |
-| `GET` | `/agents/{slug}` | `get_agent` | perfil + histórico de versões |
-| `PATCH` | `/agents/{slug}` | `update_agent` | altera o perfil (nova versão) |
-| `PUT` | `/agents/{slug}/autonomy` | `set_agent_autonomy` | liga/desliga autoatualização |
-| `DELETE` | `/agents/{slug}` | `archive_agent` | desativa o agente |
-| `POST` | `/agents/{slug}/clone` | `clone_agent` | cria agente novo a partir de outro |
-| `POST` | `/agents/{slug}/versions/{version}/restore` | `restore_agent_version` | restaura uma versão anterior |
-| `GET` | `/agents/{slug}/context` | `load_agent` | pacote de contexto do agente |
-| `GET` | `/agents/{slug}/memories` | `recall` | busca semântica nas memórias (`include_shared=true` por padrão) |
-| `POST` | `/agents/{slug}/memories` | `remember` / `add_agent_memory` | salva (ou semeia) uma memória |
-| `POST` | `/agents/{slug}/memories:forget` | `forget` | apaga ou corrige uma memória |
-| `GET` | `/agents/{slug}/sessions` | `list_sessions` | resumos de sessão |
-| `POST` | `/agents/{slug}/sessions` | `save_session` | grava resumo de sessão |
-| `GET` | `/agents/{slug}/tasks` | `list_tasks` | tarefas do agente |
-| `POST` | `/agents/{slug}/tasks` | `upsert_task` / `add_agent_task` | cria ou atualiza tarefa |
-
-Exemplos:
+All routes require `Authorization: Bearer <KB_API_KEY>`. The full list, with a test form, is at http://localhost:8000/docs.
 
 ```bash
 KEY=$KB_API_KEY
 API=http://localhost:8000
 
-# buscar
+# search
 curl -s -X POST $API/search -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
-  -d '{"query": "prazo de reembolso", "top_k": 3}'
+  -d '{"query": "refund window", "top_k": 3}'
 
-# inserir documento
+# insert a document
 curl -s -X POST $API/documents -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
-  -d '{"collection": "manuais", "title": "Horário", "content": "Atendimento de 8h às 18h."}'
+  -d '{"collection": "manuals", "title": "Opening hours", "content": "Support from 8am to 6pm."}'
 
-# criar/atualizar por id externo (sincronização)
+# create/update by external id (sync)
 curl -s -X PUT $API/documents/upsert -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
-  -d '{"collection": "manuais", "external_id": "crm-42", "title": "Contato", "content": "Ramal 200."}'
+  -d '{"collection": "manuals", "external_id": "crm-42", "title": "Contact", "content": "Extension 200."}'
 
-# contexto de um agente (mesmo retorno do load_agent)
-curl -s $API/agents/suporte/context -H "Authorization: Bearer $KEY"
+# agent context (same response as load_agent)
+curl -s $API/agents/support/context -H "Authorization: Bearer $KEY"
 
-# ligar a autonomia
-curl -s -X PUT $API/agents/suporte/autonomy -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+# turn on autonomy
+curl -s -X PUT $API/agents/support/autonomy -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
   -d '{"auto_apply_updates": true}'
-
-# apagar (ou corrigir, com "replacement") uma memória errada
-curl -s -X POST $API/agents/suporte/memories:forget -H "Authorization: Bearer $KEY" \
-  -H "Content-Type: application/json" -d '{"memory_id": 12}'
-
-# clonar um agente (tom mais formal, mesmas coleções)
-curl -s -X POST $API/agents/suporte/clone -H "Authorization: Bearer $KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"new_slug": "suporte-vip", "name": "Suporte VIP", "overrides": {"description": "Variação com tom formal."}}'
-
-# restaurar a versão 2 do perfil
-curl -s -X POST $API/agents/suporte/versions/2/restore -H "Authorization: Bearer $KEY" \
-  -H "Content-Type: application/json" -d '{"change_note": "revertendo ajuste de tom"}'
 ```
 
-## 11. Referência
+## 11. Reference
 
-### Autenticação e escopos
+### Authentication and scopes
 
-Esta versão enxuta do servidor aceita **chaves do `.env`**, sem tabela de chaves no banco nem emissão de chaves por agente:
+This lean version of the server accepts **only the single key from `.env`** (`KB_API_KEY`), which operates with the `admin` scope — that is, everything is allowed. There is no per-agent key issuance.
 
-- `KB_API_KEY` — a chave principal, com escopo `admin` (tudo liberado);
-- `KB_READ_ONLY_KEY` (opcional) — autentica com escopo apenas `read`: consulta a base, mas não escreve documentos nem gerencia agentes.
+The scopes below still exist **on each agent's profile** (`agents.scopes`, `agents.allowed_collections`): they document the agent's intended permissions and are used by the full version (web-server), but they do not restrict access on this server:
 
-Chave ausente ou inválida → `401` com `WWW-Authenticate: Bearer`; escopo insuficiente → `403`.
-
-Os escopos abaixo continuam existindo **no perfil de cada agente** (`agents.scopes`, `agents.allowed_collections`): documentam a intenção de permissão do agente e são usados pela versão completa (web-server), mas não restringem o acesso neste servidor:
-
-| Escopo | Permite |
+| Scope | Allows |
 |---|---|
-| `read` | consultar a base e ler o próprio perfil, memórias, sessões e tarefas |
-| `write` | inserir e atualizar documentos, memórias, sessões e tarefas (inclui `read`) |
-| `agents:manage` | cadastrar e configurar agentes, aprovar propostas, ligar a autonomia |
-| `admin` | tudo, incluindo dar `agents:manage` ou `admin` a um agente |
+| `read` | query the knowledge base; read and write its own memory, sessions and tasks |
+| `write` | insert and update documents (includes `read`) |
+| `agents:manage` | register and configure agents, approve proposals, turn on autonomy |
+| `admin` | everything, including granting `agents:manage` or `admin` to an agent |
 
-### Tools MCP
+### MCP tools
 
-| Grupo | Tools |
+| Group | Tools |
 |---|---|
-| Base | `search_knowledge`, `get_document`, `list_documents`, `list_collections`, `create_collection`, `add_document`, `update_document`, `upsert_document`, `archive_document`, `document_history` |
-| Agente (sobre si mesmo) | `load_agent`, `recall`, `remember`, `forget`, `save_session`, `list_sessions`, `list_tasks`, `upsert_task`, `propose_agent_update` |
-| Gestão (`agents:manage`) | `create_agent`, `update_agent`, `set_agent_autonomy`, `get_agent`, `list_agents`, `clone_agent`, `archive_agent`, `restore_agent_version`, `list_agent_proposals`, `review_agent_update`, `add_agent_memory`, `add_agent_task` |
+| Knowledge base | `search_knowledge`, `get_document`, `list_documents`, `list_collections`, `create_collection`, `add_document`, `update_document`, `upsert_document`, `archive_document`, `document_history` |
+| Agent (self) | `load_agent`, `recall`, `remember`, `forget`, `save_session`, `list_sessions`, `list_tasks`, `upsert_task`, `propose_agent_update` |
+| Management (`agents:manage`) | `create_agent`, `update_agent`, `set_agent_autonomy`, `get_agent`, `list_agents`, `clone_agent`, `archive_agent`, `restore_agent_version`, `list_agent_proposals`, `review_agent_update`, `add_agent_memory`, `add_agent_task` |
 
 **Prompts:** `design_agent`, `start_as_agent`, `answer_with_sources`, `save_learning`.
 **Resource:** `agent://{slug}/context`.
 
-### Comandos
+### Commands
 
-| Comando | O que faz |
+| Command | What it does |
 |---|---|
-| `uv run mcp-rag-api serve [--port 8000] [--reload]` | API REST + MCP HTTP |
-| `uv run mcp-rag-api stdio` | MCP via stdio (usa `KB_API_KEY`) |
-| `uv run mcp-rag-api migrate` | aplica migrações pendentes (o `serve` já faz isso) |
-| `uv run mcp-rag-api sync-agents [--out .claude/agents]` | exporta os agentes para o Claude Code |
-| `uv run mcp-rag-api cleanup` | remove memórias expiradas |
+| `uv run mcp-rag-api serve [--port 8000] [--reload]` | REST API + MCP over HTTP |
+| `uv run mcp-rag-api stdio` | MCP over stdio (uses `KB_API_KEY`) |
+| `uv run mcp-rag-api migrate` | applies pending migrations (`serve` already does this) |
+| `uv run mcp-rag-api sync-agents [--out .claude/agents]` | exports the agents for Claude Code |
+| `uv run mcp-rag-api cleanup` | removes expired memories |
 
-## 12. Manutenção
+## 12. Maintenance
 
-**Limpeza de memórias expiradas.** Agende o comando, por exemplo no `crontab -e`:
+**Expired memory cleanup.** Schedule the command, for example in `crontab -e`:
 
 ```cron
 0 3 * * * cd /mnt/l/Workspace/PERSON/concilium/server && /home/oadri/.local/bin/uv run mcp-rag-api cleanup
 ```
 
-**Backup** do database `kb`:
+**Backup** of the `kb` database:
 
 ```bash
 docker exec db-postgres pg_dump -U user -d kb -Fc > kb_$(date +%F).dump
-# restaurar:
+# restore:
 docker exec -i db-postgres pg_restore -U user -d kb --clean < kb_2026-09-29.dump
 ```
 
-**Auditoria.** Toda escrita fica na tabela `audit_log` (quem, o quê, quando):
+**Audit.** Every write lands in the `audit_log` table (who, what, when):
 
 ```bash
 docker exec db-postgres psql -U user -d kb -c "SELECT created_at, actor, action, target FROM audit_log ORDER BY id DESC LIMIT 20"
 ```
 
-**Testes:**
+**Tests:**
 
 ```bash
 uv sync --extra dev
 uv run pytest tests/unit
-# integração: o database indicado é APAGADO a cada execução
-docker exec db-postgres psql -U user -d defaultdb -c "CREATE DATABASE kb_test"   # uma vez
+# integration: the target database is WIPED on every run
+docker exec db-postgres psql -U user -d defaultdb -c "CREATE DATABASE kb_test"   # once
 TEST_DATABASE_URL=postgresql://user:password@localhost:5432/kb_test uv run pytest tests/integration
 ```
 
-## 13. Problemas comuns
+## 13. Common problems
 
-| Sintoma | Causa provável | Solução |
+| Symptom | Likely cause | Fix |
 |---|---|---|
-| `database "kb" does not exist` | database não criado | `docker exec db-postgres psql -U user -d defaultdb -c "CREATE DATABASE kb"` |
-| `connection refused` na porta 5432 | `db-postgres` parado | suba o compose do DB-DOCKER |
-| `extension "vector" is not available` | Postgres sem pgvector | use a imagem `pgvector/pgvector` (é a do `db-postgres`) |
-| `VOYAGE_API_KEY não configurada` (ou OpenAI) | falta a chave no `.env` | preencha a chave ou troque o `EMBEDDING_PROVIDER` |
-| `Chave de API inválida` | o `Bearer` não bate com `KB_API_KEY` do `.env` | confira a variável e o header |
-| `401` no `/mcp` | chave ausente ou inválida: o `/mcp` inteiro exige chave, inclusive para listar as tools | confira o header `Authorization: Bearer <KB_API_KEY>` |
-| `Sem acesso à coleção 'x'` | coleção fora de `allowed_collections` do agente | ajuste com `update_agent` |
-| Busca retorna coisas sem relação | `EMBEDDING_PROVIDER=fake` | use um provedor real |
-| API em Docker não acessa o banco | container fora da rede `db_network` | confira `docker network ls` e o nome da rede no `docker-compose.yml` |
-| Porta 8000 ocupada | outro serviço usando a porta | `uv run mcp-rag-api serve --port 8010` e ajuste o `claude mcp add` |
-| Claude não vê as tools | servidor fora do ar ou header errado | `curl localhost:8000/health`, `claude mcp list`, confira o `Bearer` |
-| `401` no `/mcp` | chave ausente ou inválida: o `/mcp` inteiro exige chave, inclusive para listar as tools | confira o header `Authorization: Bearer <KB_API_KEY>` |
+| `database "kb" does not exist` | database not created | `docker exec db-postgres psql -U user -d defaultdb -c "CREATE DATABASE kb"` |
+| `connection refused` on port 5432 | `db-postgres` stopped | start the DB-DOCKER compose |
+| `extension "vector" is not available` | Postgres without pgvector | use the `pgvector/pgvector` image (the one `db-postgres` uses) |
+| `VOYAGE_API_KEY not configured` (or OpenAI) | missing key in `.env` | fill the key or change `EMBEDDING_PROVIDER` |
+| `Invalid API key` | the `Bearer` does not match the `KB_API_KEY` from `.env` | check the variable and the header |
+| `401` on `/mcp` | missing or invalid key: the whole `/mcp` requires a key, even to list tools | check the `Authorization: Bearer <KB_API_KEY>` header |
+| `No access to collection 'x'` | collection outside the agent's `allowed_collections` | adjust with `update_agent` |
+| Search returns unrelated things | `EMBEDDING_PROVIDER=fake` | use a real provider |
+| API in Docker cannot reach the database | container outside the `db_network` network | check `docker network ls` and the network name in `docker-compose.yml` |
+| Port 8000 busy | another service using the port | `uv run mcp-rag-api serve --port 8010` and adjust `claude mcp add` |
+| Claude does not see the tools | server down or wrong header | `curl localhost:8000/health`, `claude mcp list`, check the `Bearer` |
 
-## 14. Deploy em produção (Coolify)
+## 14. Production deployment (Coolify)
 
-Fluxo **Zero-Git**, igual aos outros projetos: o GitLab CI testa, builda a imagem (`Dockerfile.coolify`) e publica no GitLab Registry. O Coolify só faz pull da imagem e sobe o container, sem código-fonte na VPS.
+**Zero-Git** flow, same as the other projects: GitLab CI tests, builds the image (`Dockerfile.coolify`) and publishes it to the GitLab Registry. Coolify only pulls the image and starts the container — no source code on the VPS.
 
 ```
-push na main → test:pytest → build:push (registry) → deploy:coolify (webhook) → Coolify faz pull e sobe
+push to main → test:pytest → build:push (registry) → deploy:coolify (webhook) → Coolify pulls and starts
 ```
 
-### 14.1 Banco: Postgres com pgvector no Coolify
+### 14.1 Database: Postgres with pgvector on Coolify
 
-Na produção não existe o `db-postgres` local. Crie um banco no Coolify:
+There is no local `db-postgres` in production. Create a database in Coolify:
 
 1. **+ New → Database → PostgreSQL**.
-2. Em **Configuration → Image**, troque para `pgvector/pgvector:pg16`. A imagem padrão do Postgres **não tem** a extensão `vector`, e sem ela as migrações falham.
-3. Salve e inicie o banco. Anote a **Postgres URL (internal)**, algo como `postgres://postgres:SENHA@<uuid>:5432/postgres`.
+2. In **Configuration → Image**, switch to `pgvector/pgvector:pg16`. The default Postgres image **does not have** the `vector` extension, and without it the migrations fail.
+3. Save and start the database. Note the **Postgres URL (internal)**, something like `postgres://postgres:PASSWORD@<uuid>:5432/postgres`.
 
-Se já existe um Postgres com pgvector no Coolify, basta criar um database novo nele (`CREATE DATABASE kb`) e usar a URL interna apontando para `/kb`.
+If you already have a Postgres with pgvector on Coolify, just create a new database on it (`CREATE DATABASE kb`) and use the internal URL pointing to `/kb`.
 
 ### 14.2 GitLab
 
-1. Suba o projeto para um repositório no GitLab (branch `main`).
-2. Em **Settings → CI/CD → Variables**, crie:
+1. Push the project to a GitLab repository (branch `main`).
+2. In **Settings → CI/CD → Variables**, create:
 
-| Variável | Valor |
+| Variable | Value |
 |---|---|
-| `COOLIFY_WEBHOOK` | `https://<coolify>/api/v1/deploy?uuid=<UUID-do-app>&force=false` (preencha depois de criar o app, no passo 14.3) |
-| `COOLIFY_SECRET` | token do Coolify com permissão de deploy (**Keys & Tokens → API tokens**) |
-| `CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET` | opcional, se o Coolify estiver atrás do Cloudflare Access |
-| `INSTALL_LOCAL_EMBEDDINGS` | opcional, `true` para incluir o modelo local na imagem (bem maior) |
+| `COOLIFY_WEBHOOK` | `https://<coolify>/api/v1/deploy?uuid=<APP-UUID>&force=false` (fill it in after creating the app, in step 14.3) |
+| `COOLIFY_SECRET` | Coolify token with deploy permission (**Keys & Tokens → API tokens**) |
+| `CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET` | optional, if Coolify is behind Cloudflare Access |
+| `INSTALL_LOCAL_EMBEDDINGS` | optional, `true` to include the local model in the image (much larger) |
 
-3. Em **Settings → Repository → Deploy tokens**, crie um token com `read_registry`. O Coolify usa esse token para baixar a imagem.
+3. In **Settings → Repository → Deploy tokens**, create a token with `read_registry`. Coolify uses this token to pull the image.
 
-O primeiro push na `main` já roda os testes (unitários e de integração, com um Postgres pgvector temporário no CI) e publica `registry.gitlab.com/<grupo>/mcp-rag-api:latest`.
+The first push to `main` already runs the tests (unit and integration, with a temporary pgvector Postgres in CI) and publishes `registry.gitlab.com/<group>/mcp-rag-api:latest`.
 
-### 14.3 Aplicação no Coolify
+### 14.3 Application on Coolify
 
-1. **+ New → Docker Image**, com a imagem `registry.gitlab.com/<grupo>/mcp-rag-api:latest`.
-   - Registry privado: cadastre o deploy token do GitLab no servidor (`docker login registry.gitlab.com`) ou nas credenciais de registry do Coolify.
+1. **+ New → Docker Image**, with the image `registry.gitlab.com/<group>/mcp-rag-api:latest`.
+   - Private registry: register the GitLab deploy token on the server (`docker login registry.gitlab.com`) or in the Coolify registry credentials.
 2. **Ports Exposes:** `8000`.
-3. **Domains:** `https://kb.seudominio.com`. O Coolify/Traefik cuida do SSL.
-4. **Health check:** ative, com path `/health` e porta `8000`. A imagem também traz o próprio `HEALTHCHECK`.
+3. **Domains:** `https://kb.yourdomain.com`. Coolify/Traefik handles SSL.
+4. **Health check:** enable it, with path `/health` and port `8000`. The image also has its own `HEALTHCHECK`.
 5. **Environment Variables:**
 
-| Variável | Exemplo |
+| Variable | Example |
 |---|---|
-| `DATABASE_URL` | URL **interna** do Postgres do passo 14.1 (troque `postgres://` por `postgresql://` se preferir; os dois funcionam) |
+| `DATABASE_URL` | **internal** URL of the Postgres from step 14.1 (swap `postgres://` for `postgresql://` if you prefer; both work) |
 | `EMBEDDING_PROVIDER` | `voyage` |
-| `VOYAGE_API_KEY` ou `OPENAI_API_KEY` | chave do provedor |
-| `KB_API_KEY` | chave única e forte (gere com `python -c "import secrets; print(secrets.token_urlsafe(32))"`) |
-| `KB_AUTH_DISABLED` | **não defina** em produção (padrão `false`) |
+| `VOYAGE_API_KEY` or `OPENAI_API_KEY` | provider key |
+| `KB_API_KEY` | single strong key (generate with `python -c "import secrets; print(secrets.token_urlsafe(32))"`) |
+| `KB_AUTH_DISABLED` | **do not set** in production (default `false`) |
 
-6. **Deploy.** As migrações rodam sozinhas no start. Copie o **Deploy Webhook** do app para a variável `COOLIFY_WEBHOOK` do GitLab.
-7. Mantenha **1 réplica**. O app não guarda estado entre requisições (stateless), mas duas réplicas subindo juntas disputariam as migrações.
+6. **Deploy.** Migrations run on their own at startup. Copy the app's **Deploy Webhook** into the `COOLIFY_WEBHOOK` GitLab variable.
+7. Keep **1 replica**. The app holds no state between requests (stateless), but two replicas starting together would race the migrations.
 
-### 14.4 Autenticação em produção
+### 14.4 Authentication in production
 
-As chaves do servidor são definidas nas **Environment Variables** do app no Coolify (passo 14.3): a principal, `KB_API_KEY` (admin total), e — opcionalmente — `KB_READ_ONLY_KEY`, com escopo só de leitura para integrações que só consultam. Gere uma forte, salve e rode o deploy. Para conectar:
+The server's only key is the `KB_API_KEY`, defined in the app's **Environment Variables** on Coolify (step 14.3). Generate a strong one, save it and deploy. To connect:
 
 ```bash
-curl https://kb.seudominio.com/health          # {"status":"ok"}
-claude mcp add --transport http kb https://kb.seudominio.com/mcp \
+curl https://kb.yourdomain.com/health          # {"status":"ok"}
+claude mcp add --transport http kb https://kb.yourdomain.com/mcp \
   --header "Authorization: Bearer $KB_API_KEY"
 ```
 
-A partir daí, tudo segue como nos tutoriais 7 a 9.
+From there, everything follows tutorials 7 to 9.
 
-### 14.5 Cuidados
+### 14.5 Care
 
-- **Segurança:** o `/mcp` inteiro exige chave válida (sem chave, responde `401`, inclusive para listar tools). A API REST também exige chave, e só o `/health` é público. Chave inválida/ausente → `401` com `WWW-Authenticate: Bearer`; escopo insuficiente → `403`. `/docs` e `/openapi.json` vêm desligados por padrão (`KB_DOCS_ENABLED`); não os reative em produção. Payloads acima de `KB_MAX_BODY_BYTES` (padrão 2 MB) são rejeitados com `413`. Roteie a `KB_API_KEY` periodicamente — basta trocar o valor e rodar o deploy.
-- **Cloudflare Access:** se o domínio estiver protegido pelo Access, os clientes MCP (Claude Code, Desktop, API) não passam pela tela de login. Crie uma regra *Bypass* para `kb.seudominio.com/mcp` e `/health`; a autenticação fica a cargo do `KB_API_KEY`.
-- **Embeddings locais:** com `INSTALL_LOCAL_EMBEDDINGS=true` a imagem inclui PyTorch e o modelo precisa de cerca de 2–3 GB de RAM. Prefira `voyage` ou `openai` em VPS pequena.
-- **Backup:** ative os backups agendados do banco no Coolify (**Database → Backups**).
-- **Limpeza de memórias expiradas:** em **Scheduled Tasks** do app, crie `mcp-rag-api cleanup` com frequência `0 3 * * *`.
+- **Security:** the whole `/mcp` requires a valid key (without a key it answers `401`, even to list tools). The REST API also requires a key; only `/health` is public.
+- **Cloudflare Access:** if the domain is protected by Access, MCP clients (Claude Code, Desktop, API) do not pass the login screen. Create a *Bypass* rule for `kb.yourdomain.com/mcp` and `/health`; authentication is handled by the `KB_API_KEY`.
+- **Local embeddings:** with `INSTALL_LOCAL_EMBEDDINGS=true` the image includes PyTorch and the model needs about 2–3 GB of RAM. Prefer `voyage` or `openai` on a small VPS.
+- **Backup:** enable scheduled database backups in Coolify (**Database → Backups**).
+- **Expired memory cleanup:** in the app's **Scheduled Tasks**, create `mcp-rag-api cleanup` with schedule `0 3 * * *`.
 
-### 14.6 Testar a imagem de produção localmente
+### 14.6 Testing the production image locally
 
 ```bash
 docker build -f Dockerfile.coolify -t mcp-rag-api:local .
@@ -552,3 +489,7 @@ docker run --rm --network db_network -p 8000:8000 \
   -e DATABASE_URL=postgresql://user:password@db-postgres:5432/kb \
   --env-file .env mcp-rag-api:local
 ```
+
+## 15. License
+
+This project is open source, under the [Apache License 2.0](LICENSE).
