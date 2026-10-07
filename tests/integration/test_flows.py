@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from mcp_rag_api.core import agents, documents, memory, search
@@ -131,3 +133,25 @@ async def test_proposals_autonomy_and_protected_fields():
     await agents.archive_agent(ADMIN, "financeiro", "teste")
     with pytest.raises(KBError):
         await memory.load_agent(agent, "financeiro")
+
+
+async def test_memory_merge_preserves_expiration():
+    await agents.create_agent(ADMIN, slug="memorias", name="Memórias", system_prompt="Guardo preferências.")
+    agent = agent_principal("memorias", {"read", "write"})
+
+    created = await memory.remember(agent, "Prefere café sem açúcar", kind="preference", expires_in_days=30)
+    assert created["action"] == "created"
+
+    # merge sem expires_in_days: a expiração existente deve ser preservada, não zerada
+    merged = await memory.remember(agent, "Prefere café sem açúcar!", kind="preference")
+    assert merged["action"] == "updated_existing" and merged["memory_id"] == created["memory_id"]
+    recalled = await memory.recall(agent, "café")
+    expires = datetime.fromisoformat(recalled[0]["expires_at"])
+    assert expires > datetime.now(UTC) + timedelta(days=29)
+
+    # merge com nova expiração: o valor informado vence sobre o existente
+    renewed = await memory.remember(agent, "Prefere café sem açúcar.", kind="preference", expires_in_days=5)
+    assert renewed["action"] == "updated_existing" and renewed["memory_id"] == created["memory_id"]
+    recalled = await memory.recall(agent, "café")
+    expires = datetime.fromisoformat(recalled[0]["expires_at"])
+    assert datetime.now(UTC) + timedelta(days=4) < expires < datetime.now(UTC) + timedelta(days=6)
