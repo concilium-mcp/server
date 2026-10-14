@@ -27,3 +27,7 @@ def test_overlap_maior_ou_igual_ao_chunk_rejeitado(overlap):
 def test_threshold_fora_de_0_a_1_rejeitado(campo, valor):
     with pytest.raises(ValidationError):
         Settings(**{campo: valor})
+
+
+def test_default_database_url_has_no_credentials():
+    assert Settings.model_fields["database_url"].default == "postgresql://localhost:5432/kb"
