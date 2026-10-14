@@ -83,7 +83,7 @@ Abre el `.env` y define **al menos** el proveedor de embeddings:
 Ejemplo:
 
 ```env
-DATABASE_URL=postgresql://user:password@localhost:5432/kb
+DATABASE_URL=postgresql://user:change-me@localhost:5432/kb
 EMBEDDING_PROVIDER=voyage
 VOYAGE_API_KEY=pa-xxxxxxxx
 ```
@@ -388,7 +388,7 @@ uv sync --extra dev
 uv run pytest tests/unit
 # integración: la base de datos indicada se BORRA en cada ejecución
 docker exec db-postgres psql -U user -d defaultdb -c "CREATE DATABASE kb_test"   # una vez
-TEST_DATABASE_URL=postgresql://user:password@localhost:5432/kb_test uv run pytest tests/integration
+TEST_DATABASE_URL=postgresql://user:change-me@localhost:5432/kb_test uv run pytest tests/integration
 ```
 
 ## 13. Problemas comunes
@@ -486,7 +486,7 @@ A partir de ahí, todo sigue como en los tutoriales 7 a 9.
 ```bash
 docker build -f Dockerfile.coolify -t mcp-rag-api:local .
 docker run --rm --network db_network -p 8000:8000 \
-  -e DATABASE_URL=postgresql://user:password@db-postgres:5432/kb \
+  -e DATABASE_URL=postgresql://user:change-me@db-postgres:5432/kb \
   --env-file .env mcp-rag-api:local
 ```
 

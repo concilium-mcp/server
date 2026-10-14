@@ -17,7 +17,8 @@ if EMBEDDING_DIM <= 0:
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    database_url: str = "postgresql://user:password@localhost:5432/kb"
+    # sem usuário/senha no default: a credencial vem sempre do .env (DATABASE_URL)
+    database_url: str = "postgresql://localhost:5432/kb"
     # None = usa as migrações empacotadas no wheel (importlib.resources);
     # MIGRATIONS_DIR no env continua podendo apontar para outro diretório.
     migrations_dir: Path | None = None
