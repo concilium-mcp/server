@@ -342,7 +342,7 @@ Los scopes de abajo siguen existiendo **en el perfil de cada agente** (`agents.s
 
 | Grupo | Tools |
 |---|---|
-| Base | `search_knowledge`, `get_document`, `list_documents`, `list_collections`, `create_collection`, `add_document`, `update_document`, `upsert_document`, `archive_document`, `document_history` |
+| Base | `search_knowledge`, `get_document`, `list_documents`, `list_collections`, `create_collection`, `add_document`, `update_document`, `edit_document`, `upsert_document`, `archive_document`, `document_history` |
 | Agente (sobre sí mismo) | `load_agent`, `recall`, `remember`, `forget`, `save_session`, `list_sessions`, `list_tasks`, `upsert_task`, `propose_agent_update` |
 | Gestión (`agents:manage`) | `create_agent`, `update_agent`, `set_agent_autonomy`, `get_agent`, `list_agents`, `clone_agent`, `archive_agent`, `restore_agent_version`, `list_agent_proposals`, `review_agent_update`, `add_agent_memory`, `add_agent_task` |
 

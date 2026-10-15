@@ -46,6 +46,34 @@ async def test_documents_search_duplicates_and_versions():
     assert all(h["document_id"] != doc_id for h in await search.search_knowledge(ADMIN, "reembolso"))
 
 
+async def test_edit_document_partial_update_and_version_lock():
+    await documents.create_collection(ADMIN, "logs")
+    doc_id = (await documents.add_document(ADMIN, "logs", "Changelog", "# Changelog\n\n## 2026-10-01\n\n- início"))[
+        "document_id"
+    ]
+
+    edited = await documents.edit_document(
+        ADMIN,
+        doc_id,
+        "entrada nova no topo",
+        edits=[{"old_text": "# Changelog", "new_text": "# Changelog\n\n## 2026-10-15\n\n- edição parcial"}],
+        append="Rodapé.",
+    )
+    assert edited["updated"] is True and edited["version"] == 2
+    content = (await documents.get_document(ADMIN, doc_id))["content"]
+    assert content == "# Changelog\n\n## 2026-10-15\n\n- edição parcial\n\n## 2026-10-01\n\n- início\n\nRodapé."
+    history = await documents.document_history(ADMIN, doc_id)
+    assert history[0]["change_note"] == "entrada nova no topo"
+
+    with pytest.raises(KBError, match="alterado por outro agente"):
+        await documents.edit_document(ADMIN, doc_id, "versão velha", append="x", base_version=1)
+    with pytest.raises(KBError, match="não encontrado"):
+        await documents.edit_document(ADMIN, doc_id, "trecho errado", edits=[{"old_text": "nada", "new_text": "y"}])
+    with pytest.raises(KBError, match="Informe edits"):
+        await documents.edit_document(ADMIN, doc_id, "vazio")
+    assert (await documents.get_document(ADMIN, doc_id))["version"] == 2
+
+
 async def test_agent_lifecycle_via_services():
     await documents.create_collection(ADMIN, "vendas")
     created = await agents.create_agent(

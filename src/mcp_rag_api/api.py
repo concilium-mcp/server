@@ -62,6 +62,18 @@ class DocumentPatch(BaseModel):
     source: str | None = None
 
 
+class TextEditIn(BaseModel):
+    old_text: str
+    new_text: str
+
+
+class DocumentEdit(BaseModel):
+    change_note: str
+    edits: list[TextEditIn] | None = None
+    append: str | None = None
+    base_version: int | None = None
+
+
 class DocumentUpsert(BaseModel):
     collection: str
     external_id: str
@@ -196,6 +208,11 @@ async def get_document(document_id: str, p: Principal = Auth) -> dict:
 @router.patch("/documents/{document_id}")
 async def update_document(document_id: str, body: DocumentPatch, p: Principal = Auth) -> dict:
     return await documents.update_document(p, document_id, **body.model_dump())
+
+
+@router.post("/documents/{document_id}/edit")
+async def edit_document(document_id: str, body: DocumentEdit, p: Principal = Auth) -> dict:
+    return await documents.edit_document(p, document_id, **body.model_dump())
 
 
 @router.delete("/documents/{document_id}")

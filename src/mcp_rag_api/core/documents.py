@@ -1,7 +1,8 @@
 """Coleções e documentos: CRUD, versionamento, indexação em chunks e detecção de duplicatas."""
 
+import re
 import uuid
-from typing import Any, cast
+from typing import Any, TypedDict, cast
 
 import asyncpg
 import numpy as np
@@ -216,6 +217,9 @@ async def add_document(
     return {"created": True, "document_id": str(doc_id), "version": 1, "chunks": len(chunks)}
 
 
+CONFLICT_MESSAGE = "O documento foi alterado por outro agente enquanto isso. Leia de novo e repita."
+
+
 async def update_document(
     p: Principal,
     document_id: str,
@@ -225,7 +229,13 @@ async def update_document(
     tags: list[str] | None = None,
     metadata: dict[str, Any] | None = None,
     source: str | None = None,
+    base_version: int | None = None,
 ) -> dict:
+    """Atualiza o documento criando uma versão nova.
+
+    Trava otimista: quando `base_version` vem informada, ela é a guarda do UPDATE
+    (`WHERE version = base_version`); sem ela, a guarda é a versão lida.
+    """
     p.require("write")
     if not change_note or not change_note.strip():
         raise KBError("change_note é obrigatório: descreva o que mudou e por quê.")
@@ -233,6 +243,8 @@ async def update_document(
         current = await _load_doc(conn, p, document_id, full=True)
         if current["status"] != "active":
             raise KBError("Documento arquivado não pode ser editado.")
+        if base_version is not None and base_version != current["version"]:
+            raise KBError(CONFLICT_MESSAGE)
         new_title = (title or current["title"]).strip()
         new_content = normalize(content) if content is not None else current["content"]
         new_tags = tags if tags is not None else current["tags"]
@@ -264,10 +276,10 @@ async def update_document(
             new_meta,
             source,
             p.actor,
-            current["version"],
+            base_version if base_version is not None else current["version"],
         )
         if version is None:
-            raise KBError("O documento foi alterado por outro agente enquanto isso. Leia de novo e repita.")
+            raise KBError(CONFLICT_MESSAGE)
         await conn.execute(
             "INSERT INTO document_versions (document_id, version, title, content, metadata, tags, "
             "changed_by, change_note) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
@@ -284,6 +296,62 @@ async def update_document(
             await _write_chunks(conn, doc_uuid, chunks)
         await audit(conn, p.actor, "document.update", document_id, version=version, note=change_note)
     return {"updated": True, "document_id": document_id, "version": version, "reindexed": chunks is not None}
+
+
+class TextEdit(TypedDict):
+    """Troca de um trecho exato do documento: old_text precisa aparecer uma única vez."""
+
+    old_text: str
+    new_text: str
+
+
+def _normalize_fragment(text: str) -> str:
+    """Mesma normalização do `normalize`, sem o strip: o trecho precisa casar com o conteúdo gravado."""
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"[ \t]+", " ", text)
+    return re.sub(r"\n{3,}", "\n\n", text)
+
+
+def apply_edits(content: str, edits: list[TextEdit] | None = None, append: str | None = None) -> str:
+    """Aplica as trocas na ordem (cada uma sobre o resultado da anterior) e acrescenta `append` no fim."""
+    for i, edit in enumerate(edits or [], start=1):
+        old = _normalize_fragment(edit.get("old_text") or "")
+        if not old.strip():
+            raise KBError(f"edits[{i}]: old_text vazio.")
+        found = content.count(old)
+        if found != 1:
+            problem = "não encontrado" if found == 0 else f"aparece {found} vezes"
+            raise KBError(
+                f"edits[{i}]: old_text {problem} no documento. Copie o trecho exato do get_document "
+                "e, se ele se repete, inclua mais texto em volta para ele ficar único."
+            )
+        content = content.replace(old, _normalize_fragment(edit.get("new_text") or ""), 1)
+    if append is not None and append.strip():
+        content = f"{content.rstrip()}\n\n{append.strip()}"
+    return content
+
+
+async def edit_document(
+    p: Principal,
+    document_id: str,
+    change_note: str,
+    edits: list[TextEdit] | None = None,
+    append: str | None = None,
+    base_version: int | None = None,
+) -> dict:
+    """Edição parcial: troca trechos e/ou acrescenta texto sem reenviar o documento inteiro.
+
+    As trocas são aplicadas no servidor sobre o conteúdo atual e gravadas como versão nova pelo
+    `update_document`, com trava otimista na versão lida (ou em `base_version`, quando informada).
+    """
+    p.require("write")
+    if not edits and not (append and append.strip()):
+        raise KBError("Informe edits (trocas de trecho) e/ou append (texto a acrescentar no fim).")
+    current = await get_document(p, document_id)
+    if base_version is not None and base_version != current["version"]:
+        raise KBError(CONFLICT_MESSAGE)
+    content = apply_edits(current["content"], edits, append)
+    return await update_document(p, document_id, change_note, content=content, base_version=current["version"])
 
 
 async def upsert_document(
