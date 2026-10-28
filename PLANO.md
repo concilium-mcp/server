@@ -1,6 +1,6 @@
-# Plano — MCP RAG API (Python + PostgreSQL + pgvector)
+# Plano — Concilium (MCP RAG API em Python + PostgreSQL + pgvector)
 
-> ⚠️ **Documento histórico do design original (import inicial).** A auth atual do server é só a chave única `KB_API_KEY` do env (sem tabela `api_keys` nem prefixo `kb_sk_`) — a fonte da verdade é o [README](README.md) + o código.
+> **Atualizado em 2026-10-28.** As fases (§11), as decisões (§12) e os critérios de pronto (§13) mostram o estado atual. As seções de design (§4 a §10) são as do plano original, com notas onde o projeto mudou. A maior diferença: este é o **server enxuto**, sem dashboard e com auth só pela chave do env (`KB_API_KEY`, mais a opcional `KB_READ_ONLY_KEY` só de leitura), sem tabela `api_keys` nem prefixo `kb_sk_`. A versão completa, com dashboard, OAuth e pastas, é o [web-server](https://github.com/concilium-mcp/web-server). A referência do dia a dia é o [README](README.md) e o código.
 
 > Servidor MCP em Python que dá aos agentes de IA (Claude e nossos agentes) uma **memória/base de conhecimento compartilhada**: consultar (RAG), inserir e atualizar conhecimento, com PostgreSQL + pgvector como armazenamento.
 
@@ -49,14 +49,14 @@
 | Banco | PostgreSQL 16 + extensão **pgvector** | Vetores + dados relacionais + full‑text no mesmo lugar |
 | Acesso ao banco / migrações | asyncpg + SQL puro; migrações em `migrations/NNN_*.sql` aplicadas no start | Menos camadas; o SQL fica igual ao desenhado aqui |
 | Embeddings | Interface plugável: Voyage AI / OpenAI (API) **ou** `sentence-transformers` local (ex.: `bge-m3`, bom em PT‑BR) | Trocar provedor sem mexer no resto |
-| Chunking | Splitter próprio por tokens com sobreposição (ex.: 500–800 tokens, overlap 10–15%) | |
+| Chunking | Splitter próprio por palavras com sobreposição (450 palavras, overlap 60; `CHUNK_WORDS` e `CHUNK_OVERLAP_WORDS`) | |
 | Rerank (opcional) | Cross-encoder local ou API de rerank | Melhora precisão do top‑k |
 | Config | pydantic-settings (`.env`) | |
-| Infra | Docker Compose só da API, usando o Postgres compartilhado do DB-DOCKER (`db-postgres`, database `kb`) | Reaproveita a infraestrutura existente |
-| Testes | pytest + pytest-asyncio + testcontainers (Postgres real) | |
+| Infra | Imagem Docker pública (`ghcr.io/concilium-mcp/server`, amd64/arm64) + qualquer PostgreSQL 16 com pgvector ≥ 0.8; `deploy/docker-compose.yml` sobe app + banco | Roda em qualquer host de containers ([guia de deploy](docs/deploy.md)) |
+| Testes | pytest + pytest-asyncio; integração contra Postgres + pgvector real (`TEST_DATABASE_URL`) | |
 | Qualidade | ruff + mypy | |
 
-> Implementado: provedor plugável (`voyage` padrão, `openai`, `local`, `fake` para testes), sempre em 1024 dimensões. Decisão pendente: **qual usar em produção** (API paga vs. modelo local). A dimensão do vetor depende dessa escolha e fica fixa na migração inicial.
+> Provedores implementados: `voyage` (padrão), `openai`, `local` (`bge-m3` na máquina) e `fake` (testes), sempre em 1024 dimensões. Trocar de provedor ou modelo depois exige reinserir os documentos.
 
 ## 4. Modelo de dados
 
@@ -122,10 +122,12 @@ CREATE INDEX ON documents USING gin (metadata);
 CREATE INDEX ON documents USING gin (tags);
 ```
 
+> Esse é o schema da migração inicial; o server só acrescentou um índice de versões (`002`). A tabela `api_keys` da §6.1 não existe no server: a auth é pela chave do env.
+
 ## 5. Pipeline RAG
 
 **Ingestão (inserir/atualizar)**
-1. Recebe texto (ou arquivo: `.md`, `.txt`, `.pdf`, `.docx` numa fase posterior).
+1. Recebe texto ou arquivo (`.pdf`, `.docx`, `.md`, `.txt` pelo `POST /documents/upload`, convertido para markdown antes do chunking).
 2. Normaliza e calcula `content_hash`; se igual ao atual → não faz nada.
 3. Faz chunking com sobreposição, mantendo título/seção no metadata do chunk.
 4. Gera embeddings em lote.
@@ -154,6 +156,8 @@ CREATE INDEX ON documents USING gin (tags);
 
 **Resources MCP** (leitura): `agent://{slug}/context`. (A v2 do SDK não injeta contexto, e portanto autenticação, em resources estáticos; por isso coleções e documentos são lidos pelas tools.)
 **Prompts MCP**: `answer_with_sources` (instrui o agente a buscar antes de responder e citar fontes) e `save_learning` (orienta o agente a registrar um aprendizado de forma padronizada).
+
+> Hoje são **32 tools**. Além das acima: `edit_document` (troca só um trecho), `create_collection` e as de agente da §6.1, menos `issue_agent_key` e `revoke_agent_key` (o server não emite chaves).
 
 Boas práticas nas tools:
 - Descrições claras de **quando** usar cada tool (o modelo decide com base nelas).
@@ -306,6 +310,8 @@ Claude: → create_agent(slug="suporte", ...)
 
 Mais tarde, para ajustar o agente, basta pedir "no agente suporte, adiciona a regra X". O Claude chama `update_agent` e o agente passa para a v2, com histórico.
 
+> No server não há chave por agente: todos se conectam com a `KB_API_KEY` (ou a `KB_READ_ONLY_KEY`, só leitura). O texto abaixo descreve o design original, que segue valendo no web-server.
+
 **Quem pode cadastrar:** as tools de gestão exigem uma chave com escopo `agents:manage`. Essa chave é a sua conexão de "administrador" no Claude. Os agentes comuns recebem chaves sem esse escopo, então não conseguem criar nem alterar outros agentes, só fazer `propose_agent_update` do próprio perfil.
 
 ### Autonomia do agente (`auto_apply_updates`)
@@ -372,19 +378,18 @@ GET    /agents/{slug}            PATCH /agents/{slug}
 GET    /agents/{slug}/context    (mesmo retorno do load_agent)
 GET    /agents/{slug}/proposals  POST /agents/{slug}/proposals/{id}/approve|reject
 GET    /agents/{slug}/memories   GET /agents/{slug}/sessions   GET /agents/{slug}/tasks
-POST   /documents/upload         (fase 3: arquivos)
+POST   /documents/upload         (PDF, .docx, .md, .txt → markdown → documento vetorizado)
 /mcp                             (endpoint MCP streamable HTTP montado no mesmo app)
 ```
 
 ## 8. Segurança
 
-- **Autenticação por API key / Bearer token** no endpoint MCP e na REST (header `Authorization`); chaves por agente, para saber quem inseriu/alterou (`created_by`/`updated_by`).
-- **Escopos por chave**: `read`, `write`, `admin`; e opcionalmente restrição por coleção.
+- **Autenticação por Bearer token** no endpoint MCP e na REST (header `Authorization`). No server: a chave única `KB_API_KEY` (acesso total) e a opcional `KB_READ_ONLY_KEY` (só leitura). Chaves por agente e escopos por chave ficaram no web-server.
 - HTTPS obrigatório fora do localhost (reverse proxy: Caddy/Traefik/Nginx).
 - Rate limit básico e limite de tamanho de conteúdo por requisição.
 - Logs de auditoria de toda escrita.
 - Conteúdo retornado pela base é **dado, não instrução** — documentar isso no prompt dos agentes (mitiga prompt injection via documentos inseridos).
-- Evolução futura: OAuth 2.1 (padrão de autorização do MCP) se for exposto publicamente.
+- OAuth 2.1 no MCP existe no [web-server](https://github.com/concilium-mcp/web-server); o server é para uso com chave fixa (integrações, agentes próprios, dev).
 
 ## 9. Conexão com Claude e nossos agentes
 
@@ -398,32 +403,33 @@ claude mcp add --transport http kb https://kb.nossodominio.com/mcp \
 ```json
 {
   "mcpServers": {
-    "kb": { "command": "uv", "args": ["run", "mcp-rag-api", "--stdio"] }
+    "kb": { "command": "uv", "args": ["run", "mcp-rag-api", "stdio"] }
   }
 }
 ```
 
-**Claude API / nossos agentes** — usar o MCP connector da Messages API (servidor remoto por URL + token) ou o Claude Agent SDK apontando para o mesmo servidor MCP. Detalhes exatos de parâmetros serão confirmados na documentação atual no momento da implementação.
+**Claude API / nossos agentes** — usar o MCP connector da Messages API (servidor remoto por URL + token) ou o Claude Agent SDK apontando para o mesmo servidor MCP. O passo a passo está no README.
 
 ## 10. Estrutura de pastas
 
 ```
-mcp-rag-api/
-├── PLANO.md / README.md
-├── pyproject.toml / .env.example
-├── docker-compose.yml / Dockerfile     # só a API; banco = db-postgres do DB-DOCKER
-├── migrations/001_init.sql             # schema completo (base + agentes + chaves + auditoria)
+server/
+├── PLANO.md / README*.md / docs/deploy*.md
+├── pyproject.toml / uv.lock / .env.example
+├── Dockerfile.coolify / docker-compose.yml (dev) / deploy/docker-compose.yml (app + pgvector)
+├── .github/workflows/docker.yml        # imagem pública no ghcr.io
 ├── src/mcp_rag_api/
-│   ├── main.py          # FastAPI + MCP montado em /mcp
-│   ├── mcp_server.py    # MCPServer: 33 tools, prompts, resource agent://{slug}/context
-│   ├── api.py           # rotas REST (espelho)
-│   ├── config.py / db.py / security.py   # settings, pool+migrações, chaves/escopos
-│   ├── cli.py           # serve, stdio, migrate, create-key, sync-agents, cleanup
+│   ├── main.py          # FastAPI + MCP em /mcp (portão de auth, limite de corpo, request id)
+│   ├── mcp_server.py    # 32 tools, prompts, resource agent://{slug}/context
+│   ├── api.py           # REST (espelho das tools + upload de arquivos)
+│   ├── config.py / db.py / security.py / logging_config.py   # settings, pool + migrações, chave do env
+│   ├── cli.py           # serve, stdio, migrate, sync-agents, cleanup
+│   ├── migrations/      # 001 e 002, aplicadas no start
 │   └── core/
 │       ├── chunking.py / embeddings.py / search.py
 │       ├── documents.py # CRUD + versionamento + duplicatas
-│       ├── agents.py    # cadastro, versões, propostas, autonomia, chaves
-│       └── memory.py    # load_agent, memórias, sessões, tarefas
+│       ├── agents.py / memory.py
+│       └── file_import.py  # PDF, .docx, .md, .txt → markdown
 └── tests/unit, tests/integration
 ```
 
@@ -431,7 +437,7 @@ mcp-rag-api/
 
 **Fase 0 — Setup (0,5 dia)**
 - [x] `pyproject.toml` (uv), ruff, mypy, pytest
-- [x] `docker-compose.yml` da API usando o `db-postgres` compartilhado (database `kb`)
+- [x] `docker-compose.yml` de dev (Postgres externo) e `deploy/docker-compose.yml` (app + pgvector)
 - [x] Config via `.env`, healthcheck
 
 **Fase 1 — Banco e núcleo (1–2 dias)**
@@ -451,43 +457,57 @@ mcp-rag-api/
 **Fase 2.5 — Registro de agentes e memória (1–2 dias)**
 - [x] Tabelas `agents`, `agent_versions`, `agent_memories`, `agent_sessions`, `agent_tasks`
 - [x] Tools `load_agent`, `recall`, `remember`, `forget`, `save_session`, `list_tasks`, `upsert_task`, `propose_agent_update`
-- [x] Tools de gestão via MCP: `create_agent`, `update_agent`, `get_agent`, `list_agents`, `clone_agent`, `archive_agent`, `issue_agent_key`, `revoke_agent_key`, `review_agent_update`, `set_agent_autonomy`, `add_agent_memory`, `add_agent_task`
+- [x] Tools de gestão via MCP: `create_agent`, `update_agent`, `get_agent`, `list_agents`, `clone_agent`, `archive_agent`, `review_agent_update`, `set_agent_autonomy`, `add_agent_memory`, `add_agent_task` (`issue_agent_key`/`revoke_agent_key` saíram com a auth por env)
 - [x] Garantir que `propose_agent_update` não altera `auto_apply_updates`, `scopes` nem `allowed_collections` (teste)
 - [x] Prompts `design_agent` (entrevista de cadastro) e `start_as_agent`; resource `agent://{slug}/context`
-- [x] Escopo `agents:manage` e API key vinculada ao agente (gerada no `create_agent`)
+- [x] Escopo `agents:manage` (a chave por agente saiu do server: auth pela `KB_API_KEY`)
 - [ ] Cadastrar 1 agente piloto **pelo chat do Claude** e validar o ciclo início → trabalho → fim → novo chat retomando
 
 **Fase 3 — REST + auth (1 dia)**
 - [x] Rotas FastAPI espelhando as tools
-- [x] API keys por agente com escopos; auditoria
-- [ ] Upload de arquivos (md/txt/pdf/docx)
+- [x] Auth pela chave do env (`KB_API_KEY`, opcional `KB_READ_ONLY_KEY` só leitura); auditoria
+- [x] Upload de arquivos (PDF, .docx, .md, .txt) pelo `POST /documents/upload`; reenviar o mesmo arquivo atualiza o documento
 
 **Fase 4 — Qualidade do RAG (contínuo)**
 - [x] Detecção de duplicatas no insert
 - [ ] Rerank opcional
 - [ ] Conjunto de avaliação (perguntas → documentos esperados) e métricas (recall@k, MRR)
-- [ ] Ajuste de tamanho de chunk / top_k
+- [ ] Ajuste fino de chunk / top_k guiado pelo conjunto de avaliação (hoje: 450/60 palavras, configurável)
 
 **Fase 5 — Deploy e operação**
 - [x] Imagem Docker (`Dockerfile.coolify`: multi-stage com uv, non-root, healthcheck, proxy headers)
-- [x] CI GitLab (testes com pgvector efêmero → build/push no registry → webhook do Coolify)
+- [x] CI com testes contra pgvector efêmero e build da imagem
+- [x] Imagem pública multi-arch no `ghcr.io` (GitHub Actions) + [guia de deploy](docs/deploy.md): Compose, Coolify e outras plataformas
 - [x] Portão de autenticação no `/mcp` inteiro (401 sem chave válida)
-- [ ] Deploy no Coolify atrás de HTTPS (banco `pgvector/pgvector:pg16`)
-- [ ] Backup do Postgres, logs estruturados, métricas básicas
-- [ ] Documentação de conexão para cada agente
+- [ ] Deploy no Coolify atrás de HTTPS (banco `pgvector/pgvector:pg16`): o passo a passo está no guia; ainda sem instância de produção do server
+- [x] Logs estruturados com request id
+- [ ] Backup automático do Postgres (o guia de deploy recomenda; no Coolify, *Database → Backups*)
+- [ ] Métricas básicas
+- [x] Documentação de conexão (README: Claude Code, Desktop, claude.ai, API e agentes próprios)
 
-## 12. Decisões em aberto
+## 12. Decisões
 
-1. Provedor de embeddings: API (Voyage/OpenAI) ou local (`bge-m3`)? → define custo, latência e dimensão do vetor.
-2. Onde hospedar (VPS própria, cloud, junto com o `DB-DOCKER` existente?).
-3. Coleções iniciais e quais fontes de dados entram primeiro.
-4. Agentes podem escrever livremente ou escritas passam por aprovação (status `pending_review`)?
-5. Multi-tenant (vários clientes/projetos isolados) é requisito agora ou depois?
-6. Quais agentes cadastrar primeiro (papel, coleções e escopos de cada um)?
+**Resolvidas**
+
+1. **Embeddings:** provedor plugável (`voyage` padrão, `openai`, `local` com `bge-m3`, `fake` para testes). Dimensão fixa em 1024; trocar de modelo depois exige reinserir os documentos (vetores de modelos diferentes não se comparam).
+2. **Hospedagem:** qualquer host de containers, com a imagem pública `ghcr.io/concilium-mcp/server` e um Postgres com pgvector ([guia de deploy](docs/deploy.md)).
+3. **Coleções:** livres, criadas por quem usa (`create_collection` ou `POST /collections`).
+4. **Escrita dos agentes:** direta para quem tem a chave de escrita, com versionamento, aviso de duplicata e auditoria; a `KB_READ_ONLY_KEY` dá acesso só de leitura. Só o **perfil** do agente passa por aprovação (propostas e autonomia, §6.1).
+5. **Multi-tenant:** fora do escopo do server. Isolamento = uma instância (e um banco) por cliente.
+6. **Agentes iniciais:** decisão de cada instalação, com o prompt `design_agent`.
+
+**Em aberto**
+
+- Rerank e conjunto de avaliação com métricas (recall@k, MRR).
+- OCR para PDF escaneado (hoje é recusado com mensagem clara).
+- Backup automático e métricas.
+
 ## 13. Critérios de pronto (MVP)
 
-- Claude Code conectado ao MCP consegue: buscar e responder citando fontes; inserir um novo documento; atualizar um documento existente e ver a nova versão refletida na busca seguinte.
-- Pelo chat do Claude (via MCP) é possível cadastrar um agente novo, alterar seu perfil, aprovar uma proposta e ligar/desligar a autoatualização, tudo sem sair da conversa.
-- Um agente cadastrado no banco é carregado com `load_agent` em um chat novo e retoma memórias, último resumo e tarefas de um chat anterior.
-- Testes de integração passando contra Postgres + pgvector reais.
-- Sobe com `docker compose up` e um `.env`.
+> Atendidos no código e cobertos pelos testes de integração (com embeddings `fake`). Falta a validação com embeddings reais e um agente piloto (§11, Fases 2 e 2.5).
+
+- [x] Claude Code conectado ao MCP consegue: buscar e responder citando fontes; inserir um novo documento; atualizar um documento existente e ver a nova versão refletida na busca seguinte.
+- [x] Pelo chat do Claude (via MCP) é possível cadastrar um agente novo, alterar seu perfil, aprovar uma proposta e ligar/desligar a autoatualização, tudo sem sair da conversa.
+- [x] Um agente cadastrado no banco é carregado com `load_agent` em um chat novo e retoma memórias, último resumo e tarefas de um chat anterior.
+- [x] Testes de integração passando contra Postgres + pgvector reais.
+- [x] Sobe com `docker compose up` e um `.env` (`deploy/docker-compose.yml`, com a imagem pública).
