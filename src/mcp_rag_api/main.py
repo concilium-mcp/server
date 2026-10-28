@@ -12,6 +12,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from . import db
 from .api import router
 from .config import EMBEDDING_DIM, get_settings
+from .core import file_import
 from .core.embeddings import close_embedder, get_embedder
 from .logging_config import get_logger, request_id_ctx, setup_logging
 from .mcp_server import mcp
@@ -66,7 +67,8 @@ class LimitBodySize:
     """Rejeita requests com Content-Length acima de KB_MAX_BODY_BYTES (413).
 
     Protege POST /documents e /search de payloads gigantes (custo de embeddings e memória).
-    Requests sem Content-Length (ex.: chunked) não são barrados aqui.
+    O upload de arquivo (POST /documents/upload) tem teto próprio: o tamanho máximo do arquivo
+    + folga do multipart. Requests sem Content-Length (ex.: chunked) não são barrados aqui.
     """
 
     def __init__(self, app: ASGIApp) -> None:
@@ -81,6 +83,8 @@ class LimitBodySize:
                 except ValueError:
                     length = 0
                 limit = get_settings().kb_max_body_bytes
+                if scope["path"] == "/documents/upload":
+                    limit = max(limit, file_import.MAX_UPLOAD_BODY_BYTES)
                 if length > limit:
                     response = JSONResponse(
                         {"detail": f"Payload acima do limite de {limit} bytes."},

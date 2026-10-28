@@ -1,14 +1,15 @@
 """API REST: espelho das tools MCP para integrações que não falam MCP."""
 
+import asyncio
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, Query
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 
 from . import db
 from .config import get_settings
-from .core import agents, documents, memory, search
+from .core import agents, documents, file_import, memory, search
 from .security import DEV_PRINCIPAL, Principal, Unauthenticated, bearer_token, resolve_api_key
 
 router = APIRouter()
@@ -198,6 +199,28 @@ async def add_document(body: DocumentIn, p: Principal = Auth) -> dict:
 @router.put("/documents/upsert")
 async def upsert_document(body: DocumentUpsert, p: Principal = Auth) -> dict:
     return await documents.upsert_document(p, **body.model_dump())
+
+
+@router.post("/documents/upload")
+async def upload_document(
+    file: UploadFile = File(...),
+    collection: str = Form(...),
+    p: Principal = Auth,
+) -> dict:
+    """PDF, Word (.docx), Markdown ou texto → documento vetorizado (plan-server-10).
+
+    Re-enviar o mesmo arquivo para a mesma coleção atualiza o documento (nova versão).
+    """
+    p.require("write")
+    p.require_collection(collection)
+    name = file_import.safe_filename(file.filename or "")
+    file_import.file_type_for(name)
+    data = await file.read(file_import.MAX_FILE_BYTES + 1)
+    if len(data) > file_import.MAX_FILE_BYTES:
+        mb = file_import.MAX_FILE_BYTES // (1024 * 1024)
+        raise HTTPException(status_code=413, detail=f"'{name}' passa de {mb} MB.")
+    converted = await asyncio.to_thread(file_import.convert_file, name, data)
+    return await file_import.import_file(p, collection, converted)
 
 
 @router.get("/documents/{document_id}")

@@ -325,6 +325,11 @@ curl -s -X POST $API/documents -H "Authorization: Bearer $KEY" -H "Content-Type:
 curl -s -X PUT $API/documents/upsert -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
   -d '{"collection": "manuals", "external_id": "crm-42", "title": "Contact", "content": "Extension 200."}'
 
+# import a file (PDF, Word .docx, Markdown or .txt, up to 25 MB): converted to markdown and vectorized.
+# Sending the same file name to the same collection again updates the document (new version).
+curl -s -X POST $API/documents/upload -H "Authorization: Bearer $KEY" \
+  -F collection=manuals -F file=@contract.pdf
+
 # agent context (same response as load_agent)
 curl -s $API/agents/support/context -H "Authorization: Bearer $KEY"
 

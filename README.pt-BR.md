@@ -333,6 +333,7 @@ A REST espelha as tools MCP — mesmas funções de `core/`, mesma autenticaçã
 | `GET` | `/documents` | `list_documents` | lista documentos (filtros por coleção/tags/status) |
 | `POST` | `/documents` | `add_document` | insere documento novo (avisa duplicata) |
 | `PUT` | `/documents/upsert` | `upsert_document` | cria ou atualiza por `external_id` (sincronização) |
+| `POST` | `/documents/upload` | — | importa PDF, Word (.docx), Markdown ou .txt (multipart: `file`, `collection`); reenviar atualiza |
 | `GET` | `/documents/{id}` | `get_document` | documento completo |
 | `PATCH` | `/documents/{id}` | `update_document` | atualiza e gera nova versão |
 | `DELETE` | `/documents/{id}` | `archive_document` | arquiva o documento |
@@ -373,6 +374,11 @@ curl -s -X POST $API/documents -H "Authorization: Bearer $KEY" -H "Content-Type:
 # criar/atualizar por id externo (sincronização)
 curl -s -X PUT $API/documents/upsert -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
   -d '{"collection": "manuais", "external_id": "crm-42", "title": "Contato", "content": "Ramal 200."}'
+
+# importar um arquivo (PDF, Word .docx, Markdown ou .txt, até 25 MB): vira markdown e é vetorizado.
+# Reenviar o mesmo nome de arquivo para a mesma coleção atualiza o documento (nova versão).
+curl -s -X POST $API/documents/upload -H "Authorization: Bearer $KEY" \
+  -F collection=manuais -F file=@contrato.pdf
 
 # contexto de um agente (mesmo retorno do load_agent)
 curl -s $API/agents/suporte/context -H "Authorization: Bearer $KEY"
