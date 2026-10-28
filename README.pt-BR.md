@@ -144,6 +144,16 @@ docker compose up -d --build
 docker compose logs -f api
 ```
 
+**Opção C: imagem pública (sem clonar o repo)**: `ghcr.io/concilium-mcp/server` (linux/amd64 e arm64), publicada a cada mudança na `main` com as tags `latest` e `sha-<commit>`. Passe as mesmas variáveis do `.env.example` com `-e` ou `--env-file`:
+
+```bash
+docker run -d --name concilium -p 8000:8000 \
+  --add-host=host.docker.internal:host-gateway \
+  -e DATABASE_URL=postgresql://user:change-me@host.docker.internal:5432/kb \
+  -e EMBEDDING_PROVIDER=voyage -e VOYAGE_API_KEY=your-key -e KB_API_KEY=a-long-random-key \
+  ghcr.io/concilium-mcp/server:latest
+```
+
 Para conferir se está no ar:
 
 ```bash
