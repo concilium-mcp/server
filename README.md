@@ -34,7 +34,7 @@ You manage everything **by talking to Claude**: registering agents, adjusting ru
 11. [Reference](#11-reference)
 12. [Maintenance](#12-maintenance)
 13. [Common problems](#13-common-problems)
-14. [Production deployment (Coolify)](#14-production-deployment-coolify)
+14. [Production deployment](#14-production-deployment)
 15. [License](#15-license)
 
 ---
@@ -180,7 +180,7 @@ Restart Claude Desktop. In this mode (stdio) the HTTP server does not need to be
 
 ### Your own agents (Claude API / Agent SDK)
 
-Point the MCP client to `https://YOUR_DOMAIN/mcp` with the `Authorization: Bearer <KB_API_KEY>` header. For production, see [deploying on Coolify](#14-production-deployment-coolify).
+Point the MCP client to `https://YOUR_DOMAIN/mcp` with the `Authorization: Bearer <KB_API_KEY>` header. For production, see [production deployment](#14-production-deployment).
 
 ## 7. Tutorial: first use
 
@@ -417,87 +417,16 @@ TEST_DATABASE_URL=postgresql://user:change-me@localhost:5432/kb_test uv run pyte
 | Port 8000 busy | another service using the port | `uv run mcp-rag-api serve --port 8010` and adjust `claude mcp add` |
 | Claude does not see the tools | server down or wrong header | `curl localhost:8000/health`, `claude mcp list`, check the `Bearer` |
 
-## 14. Production deployment (Coolify)
+## 14. Production deployment
 
-**Zero-Git** flow, same as the other projects: GitLab CI tests, builds the image (`Dockerfile.coolify`) and publishes it to the GitLab Registry. Coolify only pulls the image and starts the container — no source code on the VPS.
+Run the public image `ghcr.io/concilium-mcp/server` (linux/amd64 and arm64) with Docker Compose, Coolify, Dokploy, Railway, Kubernetes or any container host: see the **[deployment guide](docs/deploy.md)**. It covers the variables, a Compose file with pgvector, Coolify step by step, other platforms and a production checklist.
 
-```
-push to main → test:pytest → build:push (registry) → deploy:coolify (webhook) → Coolify pulls and starts
-```
-
-### 14.1 Database: Postgres with pgvector on Coolify
-
-There is no local `db-postgres` in production. Create a database in Coolify:
-
-1. **+ New → Database → PostgreSQL**.
-2. In **Configuration → Image**, switch to `pgvector/pgvector:pg16`. The default Postgres image **does not have** the `vector` extension, and without it the migrations fail.
-3. Save and start the database. Note the **Postgres URL (internal)**, something like `postgres://postgres:PASSWORD@<uuid>:5432/postgres`.
-
-If you already have a Postgres with pgvector on Coolify, just create a new database on it (`CREATE DATABASE kb`) and use the internal URL pointing to `/kb`.
-
-### 14.2 GitLab
-
-1. Push the project to a GitLab repository (branch `main`).
-2. In **Settings → CI/CD → Variables**, create:
-
-| Variable | Value |
-|---|---|
-| `COOLIFY_WEBHOOK` | `https://<coolify>/api/v1/deploy?uuid=<APP-UUID>&force=false` (fill it in after creating the app, in step 14.3) |
-| `COOLIFY_SECRET` | Coolify token with deploy permission (**Keys & Tokens → API tokens**) |
-| `CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET` | optional, if Coolify is behind Cloudflare Access |
-| `INSTALL_LOCAL_EMBEDDINGS` | optional, `true` to include the local model in the image (much larger) |
-
-3. In **Settings → Repository → Deploy tokens**, create a token with `read_registry`. Coolify uses this token to pull the image.
-
-The first push to `main` already runs the tests (unit and integration, with a temporary pgvector Postgres in CI) and publishes `registry.gitlab.com/<group>/mcp-rag-api:latest`.
-
-### 14.3 Application on Coolify
-
-1. **+ New → Docker Image**, with the image `registry.gitlab.com/<group>/mcp-rag-api:latest`.
-   - Private registry: register the GitLab deploy token on the server (`docker login registry.gitlab.com`) or in the Coolify registry credentials.
-2. **Ports Exposes:** `8000`.
-3. **Domains:** `https://kb.yourdomain.com`. Coolify/Traefik handles SSL.
-4. **Health check:** enable it, with path `/health` and port `8000`. The image also has its own `HEALTHCHECK`.
-5. **Environment Variables:**
-
-| Variable | Example |
-|---|---|
-| `DATABASE_URL` | **internal** URL of the Postgres from step 14.1 (swap `postgres://` for `postgresql://` if you prefer; both work) |
-| `EMBEDDING_PROVIDER` | `voyage` |
-| `VOYAGE_API_KEY` or `OPENAI_API_KEY` | provider key |
-| `KB_API_KEY` | single strong key (generate with `python -c "import secrets; print(secrets.token_urlsafe(32))"`) |
-| `KB_AUTH_DISABLED` | **do not set** in production (default `false`) |
-
-6. **Deploy.** Migrations run on their own at startup. Copy the app's **Deploy Webhook** into the `COOLIFY_WEBHOOK` GitLab variable.
-7. Keep **1 replica**. The app holds no state between requests (stateless), but two replicas starting together would race the migrations.
-
-### 14.4 Authentication in production
-
-The server's only key is the `KB_API_KEY`, defined in the app's **Environment Variables** on Coolify (step 14.3). Generate a strong one, save it and deploy. To connect:
+In production, always set a strong `KB_API_KEY` and never `KB_AUTH_DISABLED=true`. To connect:
 
 ```bash
 curl https://kb.yourdomain.com/health          # {"status":"ok"}
 claude mcp add --transport http kb https://kb.yourdomain.com/mcp \
   --header "Authorization: Bearer $KB_API_KEY"
-```
-
-From there, everything follows tutorials 7 to 9.
-
-### 14.5 Care
-
-- **Security:** the whole `/mcp` requires a valid key (without a key it answers `401`, even to list tools). The REST API also requires a key; only `/health` is public.
-- **Cloudflare Access:** if the domain is protected by Access, MCP clients (Claude Code, Desktop, API) do not pass the login screen. Create a *Bypass* rule for `kb.yourdomain.com/mcp` and `/health`; authentication is handled by the `KB_API_KEY`.
-- **Local embeddings:** with `INSTALL_LOCAL_EMBEDDINGS=true` the image includes PyTorch and the model needs about 2–3 GB of RAM. Prefer `voyage` or `openai` on a small VPS.
-- **Backup:** enable scheduled database backups in Coolify (**Database → Backups**).
-- **Expired memory cleanup:** in the app's **Scheduled Tasks**, create `mcp-rag-api cleanup` with schedule `0 3 * * *`.
-
-### 14.6 Testing the production image locally
-
-```bash
-docker build -f Dockerfile.coolify -t mcp-rag-api:local .
-docker run --rm --network db_network -p 8000:8000 \
-  -e DATABASE_URL=postgresql://user:change-me@db-postgres:5432/kb \
-  --env-file .env mcp-rag-api:local
 ```
 
 ## 15. License
